@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="bg">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>BlockSpark</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <main class="app" aria-label="BlockSpark block puzzle game">
+      <section class="topbar">
+        <div>
+          <h1>BlockSpark</h1>
+          <p class="subtitle">Подреди фигурите. Чисти редове и колони.</p>
+        </div>
+        <div class="scores" aria-label="Scores">
+          <div class="score-box">
+            <span>Резултат</span>
+            <strong id="score">0</strong>
+          </div>
+          <div class="score-box">
+            <span>Рекорд</span>
+            <strong id="best">0</strong>
+          </div>
+        </div>
+      </section>
+
+      <section class="board-wrap">
+        <div id="combo" class="combo" aria-live="polite"></div>
+        <div id="board" class="board" aria-label="Game board"></div>
+      </section>
+
+      <section class="tray" aria-label="Available pieces">
+        <div class="piece-slot" data-slot="0"></div>
+        <div class="piece-slot" data-slot="1"></div>
+        <div class="piece-slot" data-slot="2"></div>
+      </section>
+
+      <section class="actions">
+        <button id="newGame" type="button">Нова игра</button>
+        <button id="soundToggle" type="button" aria-pressed="true">Звук: вкл.</button>
+      </section>
+
+      <div id="gameOver" class="modal" hidden>
+        <div class="modal-panel">
+          <h2>Край на играта</h2>
+          <p>Няма възможен ход. Твоят резултат е <strong id="finalScore">0</strong>.</p>
+          <button id="restart" type="button">Играй пак</button>
+        </div>
+      </div>
+    </main>
+
+    <script src="./game.js?v=5"></script>
+  </body>
+</html>
