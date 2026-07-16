@@ -1,7 +1,7 @@
 (() => {
   "use strict";
 
-  const VERSION = "1.3.1";
+  const VERSION = "1.4.0";
   const BOARD_SIZE = 8;
   const COLORS = ["#2383e2", "#0f9d76", "#e89a3c", "#d45d79", "#8b78e6"];
   const SHAPES = [
@@ -37,10 +37,10 @@
       uploadWallpaper: "Choose image", removeWallpaper: "Remove custom image", updates: "Updates", check: "Check for updates", current: "You are up to date.",
       block: "Blockable", blockSub: "Place pieces and clear complete lines.", tetris: "Tetris",
       tetrisSub: "Classic falling blocks.", sudoku: "Sudoku", sudokuSub: "A quiet logic challenge.",
-      colorlink: "ColorLink", colorlinkSub: "Connect every matching color.", merge: "Merge", mergeSub: "Slide and combine blocks.",
+      colorlink: "ColorLink", colorlinkSub: "Connect every matching color.", merge: "2048 Merging", mergeSub: "Slide and combine blocks.",
       lights: "Lights Out", lightsSub: "Turn every light off.", mines: "Minesweeper", minesSub: "Reveal the safe squares.",
-      memory: "Memory Blocks", memorySub: "Remember every pair.", daily: "Daily challenge", dailySub: "A fresh puzzle every day.",
-      levelName: "Arcade level", xp: "XP", streak: "Streak", moves: "Moves", reset: "Reset", congratulations: "Complete!",
+      memory: "Memory Blocks", memorySub: "Find the matching pairs.", daily: "Daily Logic", dailySub: "Balance the grid in a few minutes.",
+      levelName: "Arcade level", xp: "XP", streak: "Streak", moves: "Moves", reset: "Reset", congratulations: "Complete!", notes: "Notes", erase: "Erase", check: "Check", currentTime: "Time", bestTime: "Best time", mistakes: "Mistakes", rules: "Rules", memoryRules: "Reveal two cards at a time and find every matching pair.", dailyRules: "Fill each row and column with equal suns and moons. Never place three identical symbols in a row.", resetSettings: "Reset all settings", resetConfirm: "Reset all appearance, sound, wallpaper, and game preferences?", confirm: "Reset", cancel: "Cancel", locked: "Locked", level: "Level",
       choose: "Choose difficulty", easy: "Easy", medium: "Medium", hard: "Hard", extreme: "Extreme",
       score: "Score", best: "Best", lines: "Lines", level: "Level", pause: "Pause", paused: "Paused",
       running: "Running", gameOver: "Game over", again: "Play again", back: "Home", noMoves: "No more moves.",
@@ -53,10 +53,10 @@
       uploadWallpaper: "Избери изображение", removeWallpaper: "Премахни изображението", updates: "Актуализации", check: "Провери за актуализации", current: "Приложението е актуално.",
       block: "Blockable", blockSub: "Подреждай фигури и изчиствай линии.", tetris: "Тетрис",
       tetrisSub: "Класически падащи блокове.", sudoku: "Судоку", sudokuSub: "Спокойно логическо предизвикателство.",
-      colorlink: "ColorLink", colorlinkSub: "Свържи всички еднакви цветове.", merge: "Merge", mergeSub: "Плъзгай и сливай блокове.",
+      colorlink: "ColorLink", colorlinkSub: "Свържи всички еднакви цветове.", merge: "2048 Merging", mergeSub: "Плъзгай и сливай блокове.",
       lights: "Lights Out", lightsSub: "Изгаси всички светлини.", mines: "Minesweeper", minesSub: "Открий безопасните полета.",
-      memory: "Memory Blocks", memorySub: "Запомни всички двойки.", daily: "Дневно предизвикателство", dailySub: "Нова загадка всеки ден.",
-      levelName: "Ниво в аркадата", xp: "XP", streak: "Поредица", moves: "Ходове", reset: "Нулиране", congratulations: "Готово!",
+      memory: "Memory Blocks", memorySub: "Открий еднаквите двойки.", daily: "Дневна логика", dailySub: "Балансирай решетката за минути.",
+      levelName: "Ниво в аркадата", xp: "XP", streak: "Поредица", moves: "Ходове", reset: "Нулиране", congratulations: "Готово!", notes: "Бележки", erase: "Изтрий", check: "Провери", currentTime: "Време", bestTime: "Най-добро", mistakes: "Грешки", rules: "Правила", memoryRules: "Обръщай по две карти и открий всички еднакви двойки.", dailyRules: "Попълни редовете и колоните с равен брой слънца и луни. Не поставяй три еднакви символа поред.", resetSettings: "Нулирай настройките", resetConfirm: "Да се нулират ли всички настройки за изглед, звук, фон и игри?", confirm: "Нулирай", cancel: "Отказ", locked: "Заключено", level: "Ниво",
       choose: "Избери трудност", easy: "Лесно", medium: "Средно", hard: "Трудно", extreme: "Екстремно",
       score: "Резултат", best: "Рекорд", lines: "Линии", level: "Ниво", pause: "Пауза", paused: "На пауза",
       running: "Игра", gameOver: "Край на играта", again: "Играй пак", back: "Начало", noMoves: "Няма възможен ход.",
@@ -77,7 +77,7 @@
     key: "blockable-settings-v2",
     defaults: {
       theme: "light", language: "en", sound: true, glass: false, wallpaper: "paper",
-      gameStyle: "flat", customWallpaper: "", best: 0, xp: 0, streak: 0, dailyDate: "", dailyDone: false, modeBest: {},
+      gameStyle: "flat", customWallpaper: "", best: 0, xp: 0, streak: 0, dailyDate: "", dailyDone: false, modeBest: {}, colorlinkLevel: 1, sudokuBest: {},
     },
     value: null,
     load() {
@@ -193,12 +193,12 @@
         ["block", "▦", () => this.startBlock()],
         ["tetris", "▤", () => this.startTetris()],
         ["sudoku", "#", () => this.openSudokuLevels()],
-        ["colorlink", "⌁", () => this.startColorLink()],
+        ["colorlink", "⌁", () => this.openColorLinkLevels()],
         ["merge", "＋", () => this.startMerge()],
         ["lights", "✦", () => this.startLights()],
         ["mines", "⚑", () => this.startMines()],
         ["memory", "◈", () => this.startMemory()],
-        ["daily", "✧", () => this.startColorLink(true)],
+        ["daily", "✧", () => this.startDaily()],
       ];
       games.forEach(([name, icon, handler]) => {
         const button = create("button", "game-card");
@@ -262,7 +262,7 @@
         [["en", "English"], ["bg", "Български"]], storage.value.language,
         (value) => this.setSetting("language", value),
       ));
-      const wallpaperChoices = [["paper", "Paper"], ["aurora", "Aurora"], ["kinetic", "Kinetic"], ["blueprint", "Blueprint"]];
+      const wallpaperChoices = [["paper", "Paper"], ["aurora", "Aurora"], ["kinetic", "Kinetic"], ["blueprint", "Blueprint"], ["comic", "Comic"]];
       if (storage.value.customWallpaper) wallpaperChoices.push(["custom", "Custom"]);
       addSetting(this.t("wallpaper"), choices(
         wallpaperChoices, storage.value.wallpaper, (value) => this.setSetting("wallpaper", value),
@@ -314,9 +314,11 @@
       addSetting(this.t("updates"), check, `v${VERSION}`);
 
       const footer = create("div", "sheet-footer");
+      const reset = create("button", "secondary danger-action", this.t("resetSettings"));
+      reset.addEventListener("click", () => this.openResetConfirmation(modal));
       const done = create("button", "primary", this.t("done"));
       done.addEventListener("click", () => modal.remove());
-      footer.append(done);
+      footer.append(reset, done);
       sheet.append(footer);
       modal.append(sheet);
       modal.addEventListener("click", (event) => {
@@ -346,6 +348,34 @@
         image.src = reader.result;
       });
       reader.readAsDataURL(file);
+    }
+
+    openResetConfirmation(settingsModal) {
+      const modal = create("div", "modal");
+      const sheet = create("section", "sheet");
+      sheet.append(create("h2", null, this.t("resetSettings")), create("p", null, this.t("resetConfirm")));
+      const actions = create("div", "sheet-footer");
+      const cancel = create("button", "secondary", this.t("cancel"));
+      const confirm = create("button", "primary danger-action", this.t("confirm"));
+      cancel.addEventListener("click", () => modal.remove());
+      confirm.addEventListener("click", () => { storage.value = { ...storage.defaults }; storage.save(); this.applySettings(); modal.remove(); settingsModal.remove(); this.openSettings(); });
+      actions.append(cancel, confirm); sheet.append(actions); modal.append(sheet); this.root.append(modal);
+    }
+
+    openColorLinkLevels() {
+      this.clear();
+      const screen = create("main", "screen level-map-screen");
+      screen.append(this.header(this.t("colorlink")));
+      screen.append(create("h1", "map-title", this.t("colorlink")), create("p", "map-subtitle", this.t("colorlinkSub")));
+      const map = create("div", "level-map");
+      for (let level = 1; level <= 12; level += 1) {
+        const locked = level > storage.value.colorlinkLevel;
+        const button = create("button", `level-node${locked ? " locked" : ""}${level === storage.value.colorlinkLevel ? " current" : ""}`);
+        button.type = "button"; button.disabled = locked; button.append(create("strong", null, locked ? "•" : String(level)), create("span", null, locked ? this.t("locked") : `${level} · ${level < 4 ? this.t("easy") : level < 8 ? this.t("medium") : this.t("hard")}`));
+        if (!locked) button.addEventListener("click", () => { this.clear(); this.game = new ColorLinkGame(this, false, level); });
+        map.append(button);
+      }
+      screen.append(map); this.root.append(screen);
     }
 
     openSudokuLevels() {
@@ -386,7 +416,8 @@
     startBlock() { this.clear(); this.game = new BlockGame(this); }
     startTetris() { this.clear(); this.game = new TetrisGame(this); }
     startSudoku(level) { this.clear(); this.game = new SudokuGame(this, level); }
-    startColorLink(daily = false) { this.clear(); this.game = new ColorLinkGame(this, daily); }
+    startColorLink(daily = false, level = storage.value.colorlinkLevel) { this.clear(); this.game = new ColorLinkGame(this, daily, level); }
+    startDaily() { this.clear(); this.game = new DailyLogicGame(this); }
     startMerge() { this.clear(); this.game = new MergeGame(this); }
     startLights() { this.clear(); this.game = new LightsGame(this); }
     startMines() { this.clear(); this.game = new MinesGame(this); }
@@ -763,67 +794,71 @@
   }
 
   class ColorLinkGame extends ArcadeGridGame {
-    constructor(app, daily = false) {
-      super(app, app.t("colorlink"), 6, "colorlink-screen");
-      this.daily = daily;
-      this.colors = COLORS.slice(0, 6);
-      this.grid = Array.from({ length: 6 }, () => Array(6).fill(null));
-      this.completed = new Set();
-      this.active = null;
-      this.path = [];
-      this.colors.forEach((color, row) => { this.grid[row][0] = color; this.grid[row][5] = color; });
-      this.scoreNode = this.stat(this.app.t("moves"), create("strong", null, "0"));
-      this.render();
+    constructor(app, daily = false, level = 1) {
+      const size = Math.min(10, 5 + Math.floor((level + 1) / 2));
+      super(app, app.t("colorlink"), size, "colorlink-screen");
+      this.daily = daily; this.level = level; this.size = size;
+      this.pairCount = Math.min(size - 1, 3 + Math.floor((level - 1) / 2));
+      this.colors = Array.from({ length: this.pairCount }, (_, index) => COLORS[index % COLORS.length]);
+      this.completed = new Set(); this.active = null; this.path = []; this.moves = 0;
+      this.scoreNode = this.stat(`${this.app.t("level")} ${level}`, create("strong", null, "0"));
+      this.reset();
       this.button(this.app.t("reset"), () => this.reset());
     }
 
     reset() {
-      this.grid = Array.from({ length: 6 }, () => Array(6).fill(null));
-      this.completed.clear(); this.active = null; this.path = []; this.moves = 0; this.done = false;
-      this.colors.forEach((color, row) => { this.grid[row][0] = color; this.grid[row][5] = color; });
+      this.grid = Array.from({ length: this.size }, () => Array(this.size).fill(null));
+      this.obstacles = new Set(); this.completed.clear(); this.active = null; this.path = []; this.moves = 0; this.done = false;
+      this.colors.forEach((color, row) => { this.grid[row][0] = color; this.grid[row][this.size - 1] = color; });
+      for (let index = 0; index < Math.max(0, this.level - 2); index += 1) {
+        const row = (index * 2 + 1) % this.pairCount;
+        const column = 2 + ((index * 3) % Math.max(1, this.size - 4));
+        if (!this.grid[row][column]) this.obstacles.add(`${row},${column}`);
+      }
       this.notice.textContent = ""; this.render();
     }
 
     render() {
       this.board.replaceChildren();
-      for (let row = 0; row < 6; row += 1) for (let column = 0; column < 6; column += 1) {
-        const cell = create("button", "arcade-cell color-cell");
+      for (let row = 0; row < this.size; row += 1) for (let column = 0; column < this.size; column += 1) {
+        const cell = create("button", `arcade-cell color-cell${this.obstacles.has(`${row},${column}`) ? " obstacle" : ""}`);
         const color = this.grid[row][column];
         cell.style.setProperty("--cell-color", color || "transparent");
-        cell.classList.toggle("endpoint", Boolean(color && (column === 0 || column === 5)));
-        cell.classList.toggle("path-cell", Boolean(color && column !== 0 && column !== 5));
-        cell.addEventListener("pointerdown", () => this.start(row, column));
-        cell.addEventListener("pointerenter", () => this.extend(row, column));
-        cell.addEventListener("click", () => this.extend(row, column));
+        cell.classList.toggle("endpoint", Boolean(color && (column === 0 || column === this.size - 1)));
+        cell.classList.toggle("path-cell", Boolean(color && column !== 0 && column !== this.size - 1));
+        if (!this.obstacles.has(`${row},${column}`)) {
+          cell.addEventListener("pointerdown", () => this.start(row, column));
+          cell.addEventListener("pointerenter", () => this.extend(row, column));
+          cell.addEventListener("click", () => this.extend(row, column));
+        }
         this.board.append(cell);
       }
-      this.scoreNode.textContent = String(this.moves || 0);
+      this.scoreNode.textContent = String(this.moves);
     }
 
     start(row, column) {
       const color = this.grid[row][column];
       if (!color || this.completed.has(color)) return;
-      this.active = color; this.path = [[row, column]];
-      this.notice.textContent = ""; this.render();
+      this.active = color; this.path = [[row, column]]; this.notice.textContent = ""; this.render();
     }
 
     extend(row, column) {
-      if (!this.active || this.done) return;
+      if (!this.active || this.done || this.obstacles.has(`${row},${column}`)) return;
       const last = this.path[this.path.length - 1];
       if (Math.abs(last[0] - row) + Math.abs(last[1] - column) !== 1) return;
       const cellColor = this.grid[row][column];
       if (cellColor && cellColor !== this.active) return;
       if (this.path.some(([r, c]) => r === row && c === column)) return;
       this.path.push([row, column]);
-      if (column === 5 && cellColor === this.active) {
+      if (column === this.size - 1 && cellColor === this.active) {
         this.path.forEach(([r, c]) => { this.grid[r][c] = this.active; });
         this.completed.add(this.active); this.moves += 1; this.active = null; this.path = [];
         this.render();
-        if (this.completed.size === this.colors.length) this.finish("colorlink", 50, this.daily);
-      } else {
-        this.grid[row][column] = this.active;
-        this.render();
-      }
+        if (this.completed.size === this.colors.length) {
+          storage.value.colorlinkLevel = Math.max(storage.value.colorlinkLevel, this.level + 1);
+          storage.save(); this.finish("colorlink", 50 + this.level * 5, this.daily);
+        }
+      } else { this.grid[row][column] = this.active; this.render(); }
     }
   }
 
@@ -866,15 +901,30 @@
     reset() { this.mines = new Set(); while (this.mines.size < this.mineCount) this.mines.add(Math.floor(Math.random() * 64)); this.revealed = new Set(); this.flags = new Set(); this.done = false; this.notice.textContent = ""; this.render(); }
     neighbors(index) { const r = Math.floor(index / 8); const c = index % 8; const out = []; for (let dr = -1; dr <= 1; dr += 1) for (let dc = -1; dc <= 1; dc += 1) if (dr || dc) { const rr = r + dr; const cc = c + dc; if (rr >= 0 && rr < 8 && cc >= 0 && cc < 8) out.push(rr * 8 + cc); } return out; }
     count(index) { return this.neighbors(index).filter((neighbor) => this.mines.has(neighbor)).length; }
-    render() { this.board.replaceChildren(); for (let index = 0; index < 64; index += 1) { const cell = create("button", `arcade-cell mine-cell${this.revealed.has(index) ? " revealed" : ""}${this.flags.has(index) ? " flagged" : ""}`, this.flags.has(index) ? "⚑" : this.revealed.has(index) && this.mines.has(index) ? "✦" : this.revealed.has(index) ? String(this.count(index) || "") : ""); cell.addEventListener("click", () => this.reveal(index)); cell.addEventListener("contextmenu", (event) => { event.preventDefault(); if (!this.revealed.has(index)) { this.flags.has(index) ? this.flags.delete(index) : this.flags.add(index); this.render(); } }); this.board.append(cell); } }
+    render() { this.board.replaceChildren(); for (let index = 0; index < 64; index += 1) { const cell = create("button", `arcade-cell mine-cell${this.revealed.has(index) ? " revealed" : ""}${this.flags.has(index) ? " flagged" : ""}`, this.flags.has(index) ? "⚑" : this.revealed.has(index) && this.mines.has(index) ? "💣" : this.revealed.has(index) ? String(this.count(index) || "") : ""); cell.addEventListener("click", () => this.reveal(index)); cell.addEventListener("contextmenu", (event) => { event.preventDefault(); if (!this.revealed.has(index)) { this.flags.has(index) ? this.flags.delete(index) : this.flags.add(index); this.render(); } }); this.board.append(cell); } }
     reveal(index) { if (this.done || this.flags.has(index) || this.revealed.has(index)) return; if (this.mines.has(index)) { this.revealed = new Set(this.mines); this.render(); this.notice.textContent = this.app.t("gameOver"); this.done = true; return; } const queue = [index]; while (queue.length) { const current = queue.shift(); if (this.revealed.has(current)) continue; this.revealed.add(current); if (!this.count(current)) this.neighbors(current).filter((neighbor) => !this.mines.has(neighbor)).forEach((neighbor) => queue.push(neighbor)); } this.render(); if (this.revealed.size >= 64 - this.mineCount) this.finish("mines", 60); }
   }
 
   class MemoryGame extends ArcadeGridGame {
-    constructor(app) { super(app, app.t("memory"), 4, "memory-screen"); this.reset(); this.button(app.t("reset"), () => this.reset()); }
+    constructor(app) { super(app, app.t("memory"), 4, "memory-screen"); this.screen.insertBefore(create("p", "game-instructions", this.app.t("memoryRules")), this.stats); this.reset(); this.button(app.t("reset"), () => this.reset()); }
     reset() { this.values = [...COLORS, "#f0c64b", "#4ca6e8", ...COLORS, "#f0c64b", "#4ca6e8"].sort(() => Math.random() - 0.5); this.open = []; this.matched = new Set(); this.moves = 0; this.locked = false; this.done = false; this.movesNode ||= this.stat(this.app.t("moves"), create("strong", null, "0")); this.render(); }
-    render() { this.board.replaceChildren(); this.values.forEach((color, index) => { const cell = create("button", `arcade-cell memory-cell${this.open.includes(index) || this.matched.has(index) ? " shown" : ""}`); if (this.open.includes(index) || this.matched.has(index)) cell.style.setProperty("--cell-color", color); cell.addEventListener("click", () => this.pick(index)); this.board.append(cell); }); this.movesNode.textContent = String(this.moves); }
+    render() { this.board.replaceChildren(); this.values.forEach((color, index) => { const shown = this.open.includes(index) || this.matched.has(index); const cell = create("button", `arcade-cell memory-cell${shown ? " shown" : ""}`, shown ? "" : "?"); if (shown) cell.style.setProperty("--cell-color", color); cell.addEventListener("click", () => this.pick(index)); this.board.append(cell); }); this.movesNode.textContent = String(this.moves); }
     pick(index) { if (this.locked || this.matched.has(index) || this.open.includes(index)) return; this.open.push(index); this.render(); if (this.open.length < 2) return; this.moves += 1; const [first, second] = this.open; if (this.values[first] === this.values[second]) { this.matched.add(first); this.matched.add(second); this.open = []; this.render(); if (this.matched.size === this.values.length) this.finish("memory", Math.max(20, 100 - this.moves)); } else { this.locked = true; window.setTimeout(() => { this.open = []; this.locked = false; this.render(); }, 650); } }
+  }
+
+  class DailyLogicGame extends ArcadeGridGame {
+    constructor(app) {
+      super(app, app.t("daily"), 6, "daily-screen");
+      this.screen.insertBefore(create("p", "game-instructions", this.app.t("dailyRules")), this.stats);
+      this.solution = Array.from({ length: 36 }, (_, index) => { const row = Math.floor(index / 6); const column = index % 6; return (row + column + (row % 2)) % 2 ? 1 : 2; });
+      this.boardState = Array(36).fill(0); this.given = new Set(); this.mistakes = 0; this.seed = new Date().toISOString().slice(0, 10).split("-").join("");
+      for (let index = 0; index < 36; index += 1) if ((Number(this.seed) + index * 17) % 5 < 2) { this.boardState[index] = this.solution[index]; this.given.add(index); }
+      this.mistakeNode = this.stat(this.app.t("mistakes"), create("strong", null, "0")); this.render();
+      this.button(this.app.t("check"), () => this.check(), "primary"); this.button(this.app.t("reset"), () => this.reset());
+    }
+    reset() { this.boardState = Array.from({ length: 36 }, (_, index) => this.given.has(index) ? this.solution[index] : 0); this.mistakes = 0; this.done = false; this.notice.textContent = ""; this.render(); }
+    render() { this.board.replaceChildren(); this.boardState.forEach((value, index) => { const cell = create("button", `arcade-cell daily-cell${this.given.has(index) ? " given" : ""}`, value === 1 ? "☀" : value === 2 ? "☾" : ""); cell.disabled = this.given.has(index); cell.addEventListener("click", () => { this.boardState[index] = this.boardState[index] === 0 ? 1 : this.boardState[index] === 1 ? 2 : 0; this.render(); }); this.board.append(cell); }); this.mistakeNode.textContent = String(this.mistakes); }
+    check() { if (this.done) return; if (this.boardState.some((value) => !value)) { this.notice.textContent = this.app.t("rules"); return; } const valid = this.boardState.every((value, index) => value === this.solution[index]); if (!valid) { this.mistakes += 1; this.notice.textContent = `${this.app.t("mistakes")}: ${this.mistakes}`; this.render(); return; } this.finish("daily", Math.max(25, 100 - this.mistakes * 10), true); }
   }
 
   class TetrisGame {
@@ -1129,17 +1179,23 @@
       this.board = [...this.solution];
       this.given = new Set();
       this.selected = null;
+      this.notes = Array.from({ length: 81 }, () => new Set());
+      this.wrong = new Set(); this.noteMode = false; this.mistakes = 0; this.elapsed = 0;
       const holes = { easy: 30, medium: 40, hard: 50, extreme: 58 }[level];
       [...Array(81).keys()].sort(() => Math.random() - 0.5).slice(0, holes).forEach((index) => { this.board[index] = 0; });
       this.board.forEach((value, index) => { if (value) this.given.add(index); });
       this.renderShell();
+      this.timer = window.setInterval(() => { if (!this.complete) { this.elapsed += 1; this.timeNode.textContent = this.formatTime(this.elapsed); } }, 1000);
     }
 
     renderShell() {
-      const screen = create("main", "screen");
+      const screen = create("main", "screen sudoku-screen");
       screen.append(this.app.header(this.app.t("sudoku")));
       const stats = create("div", "score-strip");
-      stats.append(this.stat(this.app.t("level"), create("strong", null, this.app.t(this.level))));
+      this.timeNode = create("strong", null, "00:00");
+      this.bestNode = create("strong", null, this.formatTime(storage.value.sudokuBest[this.level] || 0));
+      this.mistakeNode = create("strong", null, "0");
+      stats.append(this.stat(this.app.t("currentTime"), this.timeNode), this.stat(this.app.t("bestTime"), this.bestNode), this.stat(this.app.t("mistakes"), this.mistakeNode));
       this.boardNode = create("div", "sudoku-board");
       const pad = create("div", "number-pad");
       for (let number = 1; number <= 9; number += 1) {
@@ -1147,10 +1203,14 @@
         button.addEventListener("click", () => this.setNumber(number));
         pad.append(button);
       }
-      const erase = create("button", null, "×");
-      erase.addEventListener("click", () => this.setNumber(0));
-      pad.append(erase);
-      screen.append(stats, this.boardNode, pad);
+      const actions = create("div", "sudoku-actions");
+      this.notesButton = create("button", "secondary", this.app.t("notes"));
+      const erase = create("button", "secondary", this.app.t("erase"));
+      const check = create("button", "primary", this.app.t("check"));
+      this.notesButton.addEventListener("click", () => { this.noteMode = !this.noteMode; this.notesButton.classList.toggle("active", this.noteMode); });
+      erase.addEventListener("click", () => this.setNumber(0)); check.addEventListener("click", () => this.check());
+      actions.append(this.notesButton, erase, check);
+      screen.append(stats, this.boardNode, pad, actions);
       this.app.root.append(screen);
       this.draw();
     }
@@ -1161,10 +1221,18 @@
       return node;
     }
 
+    formatTime(seconds) { return `${String(Math.floor(seconds / 60)).padStart(2, "0")}:${String(seconds % 60).padStart(2, "0")}`; }
+
     draw() {
       this.boardNode.replaceChildren();
       this.board.forEach((value, index) => {
-        const button = create("button", `sudoku-cell${this.given.has(index) ? " given" : ""}${index === this.selected ? " selected" : ""}`, value || "");
+        const selectedRow = this.selected !== null && Math.floor(this.selected / 9) === Math.floor(index / 9);
+        const selectedColumn = this.selected !== null && this.selected % 9 === index % 9;
+        const sameNumber = value && this.selected !== null && value === this.board[this.selected];
+        const classes = `sudoku-cell${this.given.has(index) ? " given" : ""}${index === this.selected ? " selected" : ""}${selectedRow ? " row-highlight" : ""}${selectedColumn ? " column-highlight" : ""}${sameNumber ? " same-number" : ""}${this.wrong.has(index) ? " wrong" : ""}`;
+        const display = value || (this.notes[index].size ? [...this.notes[index]].sort().join(" ") : "");
+        const button = create("button", classes, display);
+        if (this.notes[index].size) button.classList.add("notes-cell");
         button.disabled = this.given.has(index);
         button.addEventListener("click", () => { this.selected = index; this.draw(); });
         this.boardNode.append(button);
@@ -1173,12 +1241,23 @@
 
     setNumber(number) {
       if (this.selected === null || this.given.has(this.selected)) return;
-      this.board[this.selected] = number;
+      if (this.noteMode && number) {
+        this.notes[this.selected].has(number) ? this.notes[this.selected].delete(number) : this.notes[this.selected].add(number);
+      } else {
+        this.notes[this.selected].clear(); this.board[this.selected] = number; this.wrong.delete(this.selected);
+        if (number && number !== this.solution[this.selected]) { this.wrong.add(this.selected); this.mistakes += 1; }
+      }
+      this.mistakeNode.textContent = String(this.mistakes);
       this.draw();
-      if (this.board.every(Boolean) && this.board.every((value, index) => value === this.solution[index])) this.app.toast("Complete");
+      this.checkComplete();
     }
 
-    destroy() {}
+    check() { this.board.forEach((value, index) => { if (!this.given.has(index) && value && value !== this.solution[index]) this.wrong.add(index); }); this.mistakes += this.wrong.size ? 1 : 0; this.mistakeNode.textContent = String(this.mistakes); this.draw(); this.checkComplete(); }
+    checkComplete() {
+      if (!this.board.every(Boolean) || !this.board.every((value, index) => value === this.solution[index])) return;
+      this.complete = true; window.clearInterval(this.timer); const previous = storage.value.sudokuBest[this.level] || Infinity; if (this.elapsed < previous) storage.value.sudokuBest[this.level] = this.elapsed; storage.save(); this.bestNode.textContent = this.formatTime(storage.value.sudokuBest[this.level]); this.notice = create("div", "notice", `${this.app.t("congratulations")} ${this.formatTime(this.elapsed)}`); this.boardNode.after(this.notice); this.app.award("sudoku", Math.max(20, 120 - this.elapsed));
+    }
+    destroy() { window.clearInterval(this.timer); }
   }
 
   new App($("#app")).init();

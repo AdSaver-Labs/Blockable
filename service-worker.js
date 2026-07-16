@@ -1,4 +1,4 @@
-const CACHE = "blockable-1.3.1";
+const CACHE = "blockable-1.4.0";
 const ASSETS = [
   "./",
   "./index.html",

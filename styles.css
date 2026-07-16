@@ -113,6 +113,20 @@ button { color: inherit; cursor: pointer; -webkit-tap-highlight-color: transpare
 }
 .app-shell[data-theme="dark"][data-wallpaper="aurora"] { --page: #172128; }
 .app-shell[data-theme="dark"][data-wallpaper="kinetic"] { --page: #1b1c22; }
+.app-shell[data-wallpaper="comic"] { --page: #f5cf42; }
+.app-shell[data-wallpaper="comic"]::before {
+  opacity: 1;
+  inset: 0;
+  background:
+    radial-gradient(circle at 18% 24%, #f4c531 0 34px, #17191b 35px 39px, transparent 40px),
+    radial-gradient(circle at 72% 18%, #f4c531 0 28px, #17191b 29px 33px, transparent 34px),
+    radial-gradient(circle at 42% 74%, #f4c531 0 38px, #17191b 39px 43px, transparent 44px),
+    radial-gradient(circle at 84% 82%, #f4c531 0 31px, #17191b 32px 36px, transparent 37px),
+    #f5cf42;
+  background-size: 240px 220px, 280px 260px, 320px 280px, 260px 240px, auto;
+  animation: comic-drift 20s linear infinite;
+}
+@keyframes comic-drift { to { background-position: 30px 16px, -20px 24px, 24px -18px, -30px 20px, 0 0; } }
 
 @keyframes aurora-drift { to { transform: translate3d(5vw, -4vh, 0) rotate(8deg) scale(1.08); } }
 @keyframes kinetic-turn { to { transform: rotate(360deg) scale(1.03); } }
@@ -345,13 +359,21 @@ button:focus-visible, input:focus-visible { outline: 2px solid var(--accent); ou
 .tetris-controls button:hover { background: var(--surface-hover); }
 
 .sudoku-board { display: grid; grid-template-columns: repeat(9, 1fr); border: 2px solid var(--ink); background: var(--ink); gap: 1px; aspect-ratio: 1; }
+.sudoku-screen .sudoku-board { width: min(92vw, 500px); align-self: center; grid-template-rows: repeat(9, minmax(0, 1fr)); overflow: hidden; }
 .sudoku-cell { min-width: 0; padding: 0; border: 0; border-radius: 0; background: var(--surface); color: var(--ink); font-weight: 650; font-size: clamp(0.9rem, 4.5vw, 1.3rem); }
 .sudoku-cell.given { color: var(--accent); }
 .sudoku-cell:nth-child(3n) { border-right: 2px solid var(--ink); }
 .sudoku-cell:nth-child(n+19):nth-child(-n+27), .sudoku-cell:nth-child(n+46):nth-child(-n+54) { border-bottom: 2px solid var(--ink); }
 .sudoku-cell.selected { background: var(--surface-hover); }
+.sudoku-cell.row-highlight, .sudoku-cell.column-highlight { background: color-mix(in srgb, var(--accent), var(--surface) 90%); }
+.sudoku-cell.same-number { background: color-mix(in srgb, var(--accent), var(--surface) 76%); }
+.sudoku-cell.selected { background: color-mix(in srgb, var(--accent), var(--surface) 62%); }
+.sudoku-cell.wrong { background: color-mix(in srgb, #d44c47, var(--surface) 68%); color: #b3343d; }
+.sudoku-cell.notes-cell { font-size: clamp(.55rem, 2.2vw, .8rem); letter-spacing: 1px; color: var(--muted); }
 .number-pad { display: grid; grid-template-columns: repeat(5, 1fr); gap: 7px; }
 .number-pad button { aspect-ratio: 1.2; padding: 0; border: 1px solid var(--line); border-radius: 12px; background: var(--surface); }
+.sudoku-actions { display: flex; justify-content: center; flex-wrap: wrap; gap: 8px; }
+.sudoku-actions .active { border-color: var(--accent); background: color-mix(in srgb, var(--accent), var(--surface) 84%); color: var(--accent); }
 
 .modal { position: fixed; z-index: 100; inset: 0; display: grid; place-items: end center; padding: 12px; background: rgba(0, 0, 0, 0.32); }
 .modal[hidden] { display: none; }
@@ -373,6 +395,18 @@ button:focus-visible, input:focus-visible { outline: 2px solid var(--accent); ou
 .switch:checked::after { left: 20px; }
 .sheet-footer { margin-top: 16px; display: flex; justify-content: flex-end; }
 .level-grid { display: grid; gap: 7px; margin-top: 18px; }
+.level-map-screen { width: min(100%, 560px); }
+.map-title { margin: 18px 0 0; font-size: clamp(2rem, 8vw, 3rem); line-height: .95; }
+.map-subtitle, .game-instructions { margin: 0; color: var(--muted); line-height: 1.45; }
+.level-map { display: grid; gap: 10px; padding: 12px 8px 24px 24px; position: relative; }
+.level-map::before { content: ""; position: absolute; left: 46px; top: 24px; bottom: 24px; width: 3px; border-radius: 4px; background: color-mix(in srgb, var(--accent), transparent 54%); }
+.level-node { min-height: 66px; width: min(100%, 360px); display: flex; align-items: center; gap: 14px; padding: 10px 18px; position: relative; z-index: 1; border: 1px solid var(--line); border-radius: 18px; background: var(--surface); box-shadow: 0 8px 22px rgba(20,25,31,.08); text-align: left; }
+.level-node:nth-child(even) { margin-left: 42px; }
+.level-node strong { width: 38px; height: 38px; display: grid; place-items: center; border-radius: 50%; background: var(--accent); color: white; }
+.level-node span { color: var(--muted); font-size: .82rem; }
+.level-node.current { border-color: var(--accent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent), transparent 78%), 0 10px 25px rgba(20,25,31,.1); }
+.level-node.locked { opacity: .46; }
+.danger-action { color: #b63e4b; }
 
 .arcade-screen { width: min(100%, 560px); }
 .arcade-screen .game-header { min-height: 58px; }
@@ -398,6 +432,7 @@ button:focus-visible, input:focus-visible { outline: 2px solid var(--accent); ou
 .color-cell { background: color-mix(in srgb, var(--cell-color), var(--surface) 88%); box-shadow: inset 0 -3px color-mix(in srgb, var(--cell-color), #172337 18%); }
 .color-cell.endpoint { background: var(--cell-color); box-shadow: inset 0 3px rgba(255,255,255,.42), inset 0 -5px rgba(0,0,0,.14), 0 5px 10px rgba(39,55,85,.16); }
 .color-cell.path-cell { background: color-mix(in srgb, var(--cell-color), white 18%); box-shadow: inset 0 2px rgba(255,255,255,.36), inset 0 -3px rgba(0,0,0,.12); }
+.color-cell.obstacle { background: repeating-linear-gradient(135deg, #263247 0 7px, #3a5274 7px 14px); box-shadow: inset 0 2px rgba(255,255,255,.18), inset 0 -3px rgba(0,0,0,.2); }
 .merge-cell { display: grid; place-items: center; background: color-mix(in srgb, var(--accent), var(--surface) 78%); }
 .merge-cell.value-0 { background: color-mix(in srgb, var(--board), var(--surface) 44%); }
 .merge-cell.value-2 { background: #dce9fb; color: #24588c; }
@@ -414,6 +449,8 @@ button:focus-visible, input:focus-visible { outline: 2px solid var(--accent); ou
 .mine-cell.revealed:has(+ .mine-cell) { border-radius: 4px; }
 .memory-cell { background: linear-gradient(135deg, #172337, #3a5274); color: transparent; box-shadow: inset 0 2px rgba(255,255,255,.2); }
 .memory-cell.shown { background: linear-gradient(180deg, rgba(255,255,255,.35), transparent 38%), var(--cell-color); color: #fff; }
+.daily-cell { background: color-mix(in srgb, var(--accent), var(--surface) 86%); font-size: clamp(1rem, 6vw, 1.8rem); }
+.daily-cell.given { background: color-mix(in srgb, var(--muted), var(--surface) 85%); }
 .app-shell[data-game-style="glossy"] .arcade-board { padding: 10px; gap: 6px; border-radius: 14px; border-color: rgba(125,143,174,.48); background: linear-gradient(180deg, rgba(255,255,255,.68), rgba(227,235,247,.42)), #c2cddd; box-shadow: 0 28px 70px rgba(34,45,70,.2), inset 0 1px rgba(255,255,255,.82); }
 .app-shell[data-game-style="glossy"] .arcade-cell { border-radius: 7px; box-shadow: inset 0 -2px #cbd5e6, inset 0 1px rgba(255,255,255,.72); }
 .app-shell[data-game-style="glossy"] .merge-cell, .app-shell[data-game-style="glossy"] .memory-cell.shown { box-shadow: inset 0 2px rgba(255,255,255,.42), inset 0 -5px rgba(0,0,0,.14), 0 7px 13px rgba(41,54,80,.18); }
