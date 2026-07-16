@@ -1,11 +1,13 @@
-const CACHE = "blockable-1.3.0";
+const CACHE = "blockable-1.3.1";
 const ASSETS = [
   "./",
   "./index.html",
   "./styles.css",
   "./game.js",
   "./manifest.webmanifest",
-  "./Assets/BlockableIcon.svg.png"
+  "./manifest-3d.webmanifest",
+  "./Assets/BlockableIcon.svg.png",
+  "./Assets/BlockableMinimalIcon.png"
 ];
 
 self.addEventListener("install", (event) => {

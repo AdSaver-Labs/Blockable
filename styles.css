@@ -152,9 +152,7 @@ button { color: inherit; cursor: pointer; -webkit-tap-highlight-color: transpare
 }
 
 .brand { display: flex; gap: 10px; align-items: center; font-weight: 650; font-size: 1rem; }
-.brand-mark { width: 24px; height: 24px; display: grid; grid-template-columns: repeat(2, 1fr); gap: 2px; }
-.brand-mark i { border-radius: 4px; background: var(--ink); opacity: 0.9; }
-.brand-mark i:nth-child(2), .brand-mark i:nth-child(3) { opacity: 0.38; }
+.brand-logo { width: 30px; height: 30px; display: block; object-fit: contain; border-radius: 8px; }
 
 .icon-button {
   width: 41px;

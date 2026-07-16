@@ -1,7 +1,7 @@
 (() => {
   "use strict";
 
-  const VERSION = "1.3.0";
+  const VERSION = "1.3.1";
   const BOARD_SIZE = 8;
   const COLORS = ["#2383e2", "#0f9d76", "#e89a3c", "#d45d79", "#8b78e6"];
   const SHAPES = [
@@ -116,6 +116,13 @@
       this.root.dataset.gameStyle = storage.value.gameStyle;
       this.root.style.setProperty("--custom-wallpaper", storage.value.customWallpaper ? `url(${JSON.stringify(storage.value.customWallpaper)})` : "none");
       document.documentElement.lang = storage.value.language;
+      const threeDimensional = storage.value.gameStyle === "glossy";
+      const iconPath = threeDimensional ? "./Assets/BlockableIcon.svg.png" : "./Assets/BlockableMinimalIcon.png";
+      const touchIcon = document.querySelector('link[rel="apple-touch-icon"]');
+      const manifest = document.querySelector('link[rel="manifest"]');
+      if (touchIcon) touchIcon.href = iconPath;
+      if (manifest) manifest.href = threeDimensional ? "./manifest-3d.webmanifest" : "./manifest.webmanifest";
+      this.root.querySelectorAll(".brand-logo").forEach((logo) => { logo.src = iconPath; });
     }
 
     setSetting(key, value) {
@@ -168,8 +175,9 @@
       const screen = create("main", "screen");
       const top = create("div", "topline");
       const brand = create("div", "brand");
-      const mark = create("span", "brand-mark");
-      for (let i = 0; i < 4; i += 1) mark.append(create("i"));
+      const mark = create("img", "brand-logo");
+      mark.alt = "";
+      mark.src = storage.value.gameStyle === "glossy" ? "./Assets/BlockableIcon.svg.png" : "./Assets/BlockableMinimalIcon.png";
       brand.append(mark, document.createTextNode("Blockable"));
       top.append(brand, this.iconButton(this.t("settings"), "⚙", () => this.openSettings()));
 

@@ -1,5 +1,5 @@
 {
-  "name": "Blockable",
+  "name": "Blockable 3D",
   "short_name": "Blockable",
   "description": "A tactile collection of colorful grid games.",
   "start_url": "./",
@@ -10,7 +10,7 @@
   "orientation": "portrait-primary",
   "icons": [
     {
-      "src": "./Assets/BlockableMinimalIcon.png",
+      "src": "./Assets/BlockableIcon.svg.png",
       "sizes": "1024x1024",
       "type": "image/png",
       "purpose": "any"
