@@ -2,3 +2,8 @@
 node_modules/
 dist/
 *.log
+*.app/
+*.dmg
+Installer/
+Assets/AppIcon.iconset/
+Assets/BlockableLogo.png
