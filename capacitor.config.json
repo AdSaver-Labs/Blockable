@@ -1,0 +1,14 @@
+{
+  "appId": "com.blocksaver.blockable",
+  "appName": "Blockable",
+  "webDir": "www",
+  "backgroundColor": "#f7f7f5",
+  "ios": {
+    "contentInset": "always",
+    "preferredContentMode": "mobile"
+  },
+  "android": {
+    "allowMixedContent": false,
+    "backgroundColor": "#f7f7f5"
+  }
+}

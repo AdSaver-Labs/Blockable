@@ -1,7 +1,7 @@
 (() => {
   "use strict";
 
-  const VERSION = "1.4.0";
+  const VERSION = "1.5.0";
   const BOARD_SIZE = 8;
   const COLORS = ["#2383e2", "#0f9d76", "#e89a3c", "#d45d79", "#8b78e6"];
   const SHAPES = [
@@ -44,7 +44,8 @@
       choose: "Choose difficulty", easy: "Easy", medium: "Medium", hard: "Hard", extreme: "Extreme",
       score: "Score", best: "Best", lines: "Lines", level: "Level", pause: "Pause", paused: "Paused",
       running: "Running", gameOver: "Game over", again: "Play again", back: "Home", noMoves: "No more moves.",
-      next: "Next", done: "Done", cleared: "cleared",
+      next: "Next", done: "Done", cleared: "cleared", reveal: "Reveal", flag: "Flag",
+      updateAvailable: "Version {version} is available.", updateFailed: "Could not check for updates.", storageFailed: "Your changes could not be saved on this device.",
     },
     bg: {
       tagline: "Малка колекция от фокусирани игри.", settings: "Настройки", newGame: "Нова игра",
@@ -60,7 +61,8 @@
       choose: "Избери трудност", easy: "Лесно", medium: "Средно", hard: "Трудно", extreme: "Екстремно",
       score: "Резултат", best: "Рекорд", lines: "Линии", level: "Ниво", pause: "Пауза", paused: "На пауза",
       running: "Игра", gameOver: "Край на играта", again: "Играй пак", back: "Начало", noMoves: "Няма възможен ход.",
-      next: "Следва", done: "Готово", cleared: "изчистени",
+      next: "Следва", done: "Готово", cleared: "изчистени", reveal: "Откривай", flag: "Флаг",
+      updateAvailable: "Налична е версия {version}.", updateFailed: "Проверката за актуализации не бе успешна.", storageFailed: "Промените не могат да бъдат запазени на това устройство.",
     },
   };
 
@@ -72,6 +74,19 @@
     return node;
   };
   const randomItem = (items) => items[Math.floor(Math.random() * items.length)];
+  const shuffle = (items) => {
+    const result = [...items];
+    for (let index = result.length - 1; index > 0; index -= 1) {
+      const target = Math.floor(Math.random() * (index + 1));
+      [result[index], result[target]] = [result[target], result[index]];
+    }
+    return result;
+  };
+  const localDateKey = () => {
+    const now = new Date();
+    const offset = now.getTimezoneOffset() * 60000;
+    return new Date(now.getTime() - offset).toISOString().slice(0, 10);
+  };
 
   const storage = {
     key: "blockable-settings-v2",
@@ -80,15 +95,42 @@
       gameStyle: "flat", customWallpaper: "", best: 0, xp: 0, streak: 0, dailyDate: "", dailyDone: false, modeBest: {}, colorlinkLevel: 1, sudokuBest: {},
     },
     value: null,
+    error: null,
     load() {
       try {
-        this.value = { ...this.defaults, ...JSON.parse(localStorage.getItem(this.key) || "{}") };
+        const saved = JSON.parse(localStorage.getItem(this.key) || "{}");
+        const allowed = (value, options, fallback) => options.includes(value) ? value : fallback;
+        this.value = {
+          ...this.defaults,
+          ...(saved && typeof saved === "object" ? saved : {}),
+          theme: allowed(saved?.theme, ["light", "dark"], this.defaults.theme),
+          language: allowed(saved?.language, Object.keys(COPY), this.defaults.language),
+          wallpaper: allowed(saved?.wallpaper, ["paper", "aurora", "kinetic", "blueprint", "comic", "custom"], this.defaults.wallpaper),
+          gameStyle: allowed(saved?.gameStyle, ["flat", "glossy"], this.defaults.gameStyle),
+          sound: typeof saved?.sound === "boolean" ? saved.sound : this.defaults.sound,
+          glass: typeof saved?.glass === "boolean" ? saved.glass : this.defaults.glass,
+          customWallpaper: typeof saved?.customWallpaper === "string" ? saved.customWallpaper : "",
+          best: Number.isFinite(saved?.best) ? Math.max(0, saved.best) : 0,
+          xp: Number.isFinite(saved?.xp) ? Math.max(0, saved.xp) : 0,
+          streak: Number.isFinite(saved?.streak) ? Math.max(0, saved.streak) : 0,
+          colorlinkLevel: Number.isFinite(saved?.colorlinkLevel) ? Math.max(1, Math.floor(saved.colorlinkLevel)) : 1,
+          modeBest: saved?.modeBest && typeof saved.modeBest === "object" ? saved.modeBest : {},
+          sudokuBest: saved?.sudokuBest && typeof saved.sudokuBest === "object" ? saved.sudokuBest : {},
+        };
+        if (!this.value.customWallpaper && this.value.wallpaper === "custom") this.value.wallpaper = "paper";
       } catch {
         this.value = { ...this.defaults };
       }
     },
     save() {
-      localStorage.setItem(this.key, JSON.stringify(this.value));
+      try {
+        localStorage.setItem(this.key, JSON.stringify(this.value));
+        this.error = null;
+        return true;
+      } catch (error) {
+        this.error = error;
+        return false;
+      }
     },
   };
 
@@ -97,6 +139,7 @@
       this.root = root;
       this.game = null;
       this.audioContext = null;
+      this.boundVisibilityChange = () => this.setActive(!document.hidden);
     }
 
     t(key) {
@@ -107,6 +150,25 @@
       storage.load();
       this.applySettings();
       this.showHome();
+      document.addEventListener("visibilitychange", this.boundVisibilityChange);
+      window.addEventListener("pagehide", () => this.setActive(false));
+      window.addEventListener("pageshow", () => this.setActive(!document.hidden));
+      this.registerServiceWorker();
+    }
+
+    setActive(active) {
+      this.root.dataset.paused = String(!active);
+      this.game?.setActive?.(active);
+      if (!this.audioContext) return;
+      if (active && storage.value.sound) this.audioContext.resume().catch(() => {});
+      if (!active) this.audioContext.suspend().catch(() => {});
+    }
+
+    registerServiceWorker() {
+      const native = window.Capacitor?.isNativePlatform?.() === true;
+      if (!native && "serviceWorker" in navigator && /^https?:$/.test(location.protocol)) {
+        navigator.serviceWorker.register("./service-worker.js").catch(() => {});
+      }
     }
 
     applySettings() {
@@ -122,12 +184,14 @@
       const manifest = document.querySelector('link[rel="manifest"]');
       if (touchIcon) touchIcon.href = iconPath;
       if (manifest) manifest.href = threeDimensional ? "./manifest-3d.webmanifest" : "./manifest.webmanifest";
+      const themeColor = document.querySelector('meta[name="theme-color"]');
+      if (themeColor) themeColor.content = storage.value.theme === "dark" ? "#191919" : "#f7f7f5";
       this.root.querySelectorAll(".brand-logo").forEach((logo) => { logo.src = iconPath; });
     }
 
     setSetting(key, value) {
       storage.value[key] = value;
-      storage.save();
+      if (!storage.save()) this.toast(this.t("storageFailed"));
       this.applySettings();
     }
 
@@ -214,7 +278,7 @@
 
       const footer = create("footer", "home-footer");
       const update = create("button", "choice", this.t("check"));
-      update.addEventListener("click", () => this.toast(this.t("current")));
+      update.addEventListener("click", () => this.checkForUpdates());
       const level = Math.floor(storage.value.xp / 100) + 1;
       footer.append(create("span", null, `v${VERSION} · ${this.t("levelName")} ${level} · ${storage.value.xp} ${this.t("xp")}`), update);
       screen.append(top, hero, grid, footer);
@@ -225,6 +289,20 @@
       const notice = create("div", "notice", message);
       this.root.querySelector(".screen")?.append(notice);
       window.setTimeout(() => notice.remove(), 2200);
+    }
+
+    async checkForUpdates() {
+      try {
+        const response = await fetch("./version.json", { cache: "no-store" });
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        const release = await response.json();
+        const message = release.version === VERSION
+          ? this.t("current")
+          : this.t("updateAvailable").replace("{version}", release.version);
+        this.toast(message);
+      } catch {
+        this.toast(location.protocol === "file:" ? this.t("current") : this.t("updateFailed"));
+      }
     }
 
     openSettings() {
@@ -310,7 +388,7 @@
       });
 
       const check = create("button", "secondary", this.t("check"));
-      check.addEventListener("click", () => this.toast(this.t("current")));
+      check.addEventListener("click", () => this.checkForUpdates());
       addSetting(this.t("updates"), check, `v${VERSION}`);
 
       const footer = create("div", "sheet-footer");
@@ -332,15 +410,21 @@
       reader.addEventListener("load", () => {
         const image = new Image();
         image.addEventListener("load", () => {
-          const maximum = 1600;
+          const maximum = 1280;
           const scale = Math.min(1, maximum / Math.max(image.naturalWidth, image.naturalHeight));
           const canvas = document.createElement("canvas");
           canvas.width = Math.max(1, Math.round(image.naturalWidth * scale));
           canvas.height = Math.max(1, Math.round(image.naturalHeight * scale));
           canvas.getContext("2d").drawImage(image, 0, 0, canvas.width, canvas.height);
-          storage.value.customWallpaper = canvas.toDataURL("image/jpeg", 0.84);
+          const previousWallpaper = storage.value.customWallpaper;
+          storage.value.customWallpaper = canvas.toDataURL("image/jpeg", 0.78);
           storage.value.wallpaper = "custom";
-          storage.save();
+          if (!storage.save()) {
+            storage.value.customWallpaper = previousWallpaper;
+            storage.value.wallpaper = previousWallpaper ? "custom" : "paper";
+            this.toast(this.t("storageFailed"));
+            return;
+          }
           this.applySettings();
           modal.remove();
           this.openSettings();
@@ -403,7 +487,7 @@
       storage.value.xp += amount;
       storage.value.modeBest[mode] = Math.max(storage.value.modeBest[mode] || 0, amount);
       if (daily) {
-        const today = new Date().toISOString().slice(0, 10);
+        const today = localDateKey();
         if (storage.value.dailyDate !== today) {
           storage.value.dailyDate = today;
           storage.value.dailyDone = true;
@@ -800,8 +884,17 @@
       this.daily = daily; this.level = level; this.size = size;
       this.pairCount = Math.min(size - 1, 3 + Math.floor((level - 1) / 2));
       this.colors = Array.from({ length: this.pairCount }, (_, index) => COLORS[index % COLORS.length]);
-      this.completed = new Set(); this.active = null; this.path = []; this.moves = 0;
+      this.completed = new Set(); this.active = null; this.path = []; this.moves = 0; this.dragging = false;
       this.scoreNode = this.stat(`${this.app.t("level")} ${level}`, create("strong", null, "0"));
+      this.boundPointerMove = (event) => {
+        if (!this.dragging) return;
+        const cell = document.elementFromPoint(event.clientX, event.clientY)?.closest(".color-cell");
+        if (cell && this.board.contains(cell)) this.extend(Number(cell.dataset.row), Number(cell.dataset.column));
+      };
+      this.boundPointerEnd = () => { this.dragging = false; };
+      this.board.addEventListener("pointermove", this.boundPointerMove);
+      window.addEventListener("pointerup", this.boundPointerEnd);
+      window.addEventListener("pointercancel", this.boundPointerEnd);
       this.reset();
       this.button(this.app.t("reset"), () => this.reset());
     }
@@ -822,13 +915,14 @@
       this.board.replaceChildren();
       for (let row = 0; row < this.size; row += 1) for (let column = 0; column < this.size; column += 1) {
         const cell = create("button", `arcade-cell color-cell${this.obstacles.has(`${row},${column}`) ? " obstacle" : ""}`);
+        cell.dataset.row = String(row);
+        cell.dataset.column = String(column);
         const color = this.grid[row][column];
         cell.style.setProperty("--cell-color", color || "transparent");
         cell.classList.toggle("endpoint", Boolean(color && (column === 0 || column === this.size - 1)));
         cell.classList.toggle("path-cell", Boolean(color && column !== 0 && column !== this.size - 1));
         if (!this.obstacles.has(`${row},${column}`)) {
-          cell.addEventListener("pointerdown", () => this.start(row, column));
-          cell.addEventListener("pointerenter", () => this.extend(row, column));
+          cell.addEventListener("pointerdown", (event) => { event.preventDefault(); this.start(row, column); });
           cell.addEventListener("click", () => this.extend(row, column));
         }
         this.board.append(cell);
@@ -839,7 +933,7 @@
     start(row, column) {
       const color = this.grid[row][column];
       if (!color || this.completed.has(color)) return;
-      this.active = color; this.path = [[row, column]]; this.notice.textContent = ""; this.render();
+      this.dragging = true; this.active = color; this.path = [[row, column]]; this.notice.textContent = ""; this.render();
     }
 
     extend(row, column) {
@@ -860,6 +954,12 @@
         }
       } else { this.grid[row][column] = this.active; this.render(); }
     }
+
+    destroy() {
+      this.board.removeEventListener("pointermove", this.boundPointerMove);
+      window.removeEventListener("pointerup", this.boundPointerEnd);
+      window.removeEventListener("pointercancel", this.boundPointerEnd);
+    }
   }
 
   class MergeGame extends ArcadeGridGame {
@@ -870,7 +970,20 @@
       [0, 1].forEach(() => this.addRandom()); this.render();
       [["←", "left"], ["↑", "up"], ["↓", "down"], ["→", "right"]].forEach(([label, direction]) => this.button(label, () => this.move(direction), "arcade-control"));
       this.boundKeyDown = (event) => { const map = { ArrowLeft: "left", ArrowRight: "right", ArrowUp: "up", ArrowDown: "down" }; if (map[event.key]) { event.preventDefault(); this.move(map[event.key]); } };
+      this.swipeStart = null;
+      this.boundPointerDown = (event) => { this.swipeStart = [event.clientX, event.clientY]; };
+      this.boundPointerUp = (event) => {
+        if (!this.swipeStart) return;
+        const [startX, startY] = this.swipeStart;
+        this.swipeStart = null;
+        const deltaX = event.clientX - startX;
+        const deltaY = event.clientY - startY;
+        if (Math.max(Math.abs(deltaX), Math.abs(deltaY)) < 24) return;
+        this.move(Math.abs(deltaX) > Math.abs(deltaY) ? (deltaX > 0 ? "right" : "left") : (deltaY > 0 ? "down" : "up"));
+      };
       window.addEventListener("keydown", this.boundKeyDown);
+      this.board.addEventListener("pointerdown", this.boundPointerDown);
+      this.board.addEventListener("pointerup", this.boundPointerUp);
     }
 
     addRandom() { const empty = []; this.grid.forEach((row, r) => row.forEach((value, c) => { if (!value) empty.push([r, c]); })); if (empty.length) { const [r, c] = randomItem(empty); this.grid[r][c] = Math.random() < 0.9 ? 2 : 4; } }
@@ -886,7 +999,7 @@
       this.addRandom(); this.render(); this.app.sound(280);
       if (this.grid.flat().some((value) => value >= 2048)) this.finish("merge", Math.max(20, this.score));
     }
-    destroy() { window.removeEventListener("keydown", this.boundKeyDown); }
+    destroy() { window.removeEventListener("keydown", this.boundKeyDown); this.board.removeEventListener("pointerdown", this.boundPointerDown); this.board.removeEventListener("pointerup", this.boundPointerUp); }
   }
 
   class LightsGame extends ArcadeGridGame {
@@ -897,17 +1010,19 @@
   }
 
   class MinesGame extends ArcadeGridGame {
-    constructor(app) { super(app, app.t("mines"), 8, "mines-screen"); this.mineCount = 10; this.reset(); this.button(app.t("reset"), () => this.reset()); }
+    constructor(app) { super(app, app.t("mines"), 8, "mines-screen"); this.mineCount = 10; this.action = "reveal"; this.reset(); this.button(app.t("reset"), () => this.reset()); this.modeButton = this.button(app.t("flag"), () => this.toggleAction()); }
     reset() { this.mines = new Set(); while (this.mines.size < this.mineCount) this.mines.add(Math.floor(Math.random() * 64)); this.revealed = new Set(); this.flags = new Set(); this.done = false; this.notice.textContent = ""; this.render(); }
+    toggleAction() { this.action = this.action === "reveal" ? "flag" : "reveal"; this.modeButton.textContent = this.app.t(this.action === "reveal" ? "flag" : "reveal"); this.modeButton.classList.toggle("active", this.action === "flag"); }
+    toggleFlag(index) { if (this.done || this.revealed.has(index)) return; this.flags.has(index) ? this.flags.delete(index) : this.flags.add(index); this.render(); }
     neighbors(index) { const r = Math.floor(index / 8); const c = index % 8; const out = []; for (let dr = -1; dr <= 1; dr += 1) for (let dc = -1; dc <= 1; dc += 1) if (dr || dc) { const rr = r + dr; const cc = c + dc; if (rr >= 0 && rr < 8 && cc >= 0 && cc < 8) out.push(rr * 8 + cc); } return out; }
     count(index) { return this.neighbors(index).filter((neighbor) => this.mines.has(neighbor)).length; }
-    render() { this.board.replaceChildren(); for (let index = 0; index < 64; index += 1) { const cell = create("button", `arcade-cell mine-cell${this.revealed.has(index) ? " revealed" : ""}${this.flags.has(index) ? " flagged" : ""}`, this.flags.has(index) ? "⚑" : this.revealed.has(index) && this.mines.has(index) ? "💣" : this.revealed.has(index) ? String(this.count(index) || "") : ""); cell.addEventListener("click", () => this.reveal(index)); cell.addEventListener("contextmenu", (event) => { event.preventDefault(); if (!this.revealed.has(index)) { this.flags.has(index) ? this.flags.delete(index) : this.flags.add(index); this.render(); } }); this.board.append(cell); } }
+    render() { this.board.replaceChildren(); for (let index = 0; index < 64; index += 1) { const cell = create("button", `arcade-cell mine-cell${this.revealed.has(index) ? " revealed" : ""}${this.flags.has(index) ? " flagged" : ""}`, this.flags.has(index) ? "⚑" : this.revealed.has(index) && this.mines.has(index) ? "💣" : this.revealed.has(index) ? String(this.count(index) || "") : ""); cell.addEventListener("click", () => this.action === "flag" ? this.toggleFlag(index) : this.reveal(index)); cell.addEventListener("contextmenu", (event) => { event.preventDefault(); this.toggleFlag(index); }); this.board.append(cell); } }
     reveal(index) { if (this.done || this.flags.has(index) || this.revealed.has(index)) return; if (this.mines.has(index)) { this.revealed = new Set(this.mines); this.render(); this.notice.textContent = this.app.t("gameOver"); this.done = true; return; } const queue = [index]; while (queue.length) { const current = queue.shift(); if (this.revealed.has(current)) continue; this.revealed.add(current); if (!this.count(current)) this.neighbors(current).filter((neighbor) => !this.mines.has(neighbor)).forEach((neighbor) => queue.push(neighbor)); } this.render(); if (this.revealed.size >= 64 - this.mineCount) this.finish("mines", 60); }
   }
 
   class MemoryGame extends ArcadeGridGame {
     constructor(app) { super(app, app.t("memory"), 4, "memory-screen"); this.screen.insertBefore(create("p", "game-instructions", this.app.t("memoryRules")), this.stats); this.reset(); this.button(app.t("reset"), () => this.reset()); }
-    reset() { this.values = [...COLORS, "#f0c64b", "#4ca6e8", ...COLORS, "#f0c64b", "#4ca6e8"].sort(() => Math.random() - 0.5); this.open = []; this.matched = new Set(); this.moves = 0; this.locked = false; this.done = false; this.movesNode ||= this.stat(this.app.t("moves"), create("strong", null, "0")); this.render(); }
+    reset() { this.values = shuffle([...COLORS, "#f0c64b", "#4ca6e8", ...COLORS, "#f0c64b", "#4ca6e8"]); this.open = []; this.matched = new Set(); this.moves = 0; this.locked = false; this.done = false; this.movesNode ||= this.stat(this.app.t("moves"), create("strong", null, "0")); this.render(); }
     render() { this.board.replaceChildren(); this.values.forEach((color, index) => { const shown = this.open.includes(index) || this.matched.has(index); const cell = create("button", `arcade-cell memory-cell${shown ? " shown" : ""}`, shown ? "" : "?"); if (shown) cell.style.setProperty("--cell-color", color); cell.addEventListener("click", () => this.pick(index)); this.board.append(cell); }); this.movesNode.textContent = String(this.moves); }
     pick(index) { if (this.locked || this.matched.has(index) || this.open.includes(index)) return; this.open.push(index); this.render(); if (this.open.length < 2) return; this.moves += 1; const [first, second] = this.open; if (this.values[first] === this.values[second]) { this.matched.add(first); this.matched.add(second); this.open = []; this.render(); if (this.matched.size === this.values.length) this.finish("memory", Math.max(20, 100 - this.moves)); } else { this.locked = true; window.setTimeout(() => { this.open = []; this.locked = false; this.render(); }, 650); } }
   }
@@ -917,7 +1032,7 @@
       super(app, app.t("daily"), 6, "daily-screen");
       this.screen.insertBefore(create("p", "game-instructions", this.app.t("dailyRules")), this.stats);
       this.solution = Array.from({ length: 36 }, (_, index) => { const row = Math.floor(index / 6); const column = index % 6; return (row + column + (row % 2)) % 2 ? 1 : 2; });
-      this.boardState = Array(36).fill(0); this.given = new Set(); this.mistakes = 0; this.seed = new Date().toISOString().slice(0, 10).split("-").join("");
+      this.boardState = Array(36).fill(0); this.given = new Set(); this.mistakes = 0; this.seed = localDateKey().split("-").join("");
       for (let index = 0; index < 36; index += 1) if ((Number(this.seed) + index * 17) % 5 < 2) { this.boardState[index] = this.solution[index]; this.given.add(index); }
       this.mistakeNode = this.stat(this.app.t("mistakes"), create("strong", null, "0")); this.render();
       this.button(this.app.t("check"), () => this.check(), "primary"); this.button(this.app.t("reset"), () => this.reset());
@@ -933,16 +1048,17 @@
       this.rows = 20;
       this.columns = 10;
       this.dropInterval = 620;
-      this.lastTick = Date.now();
+      this.lastTick = performance.now();
       this.elapsed = 0;
-      this.dropTimer = null;
+      this.animationFrame = null;
+      this.backgrounded = document.hidden;
       this.paused = false;
       this.over = false;
       this.resetState();
       this.renderShell();
       this.boundKeyDown = (event) => this.keyDown(event);
       window.addEventListener("keydown", this.boundKeyDown);
-      this.dropTimer = window.setInterval(() => this.tick(), 50);
+      this.animationFrame = window.requestAnimationFrame((time) => this.tick(time));
     }
 
     resetState() {
@@ -992,7 +1108,7 @@
       const definitions = [
         ["←", "Move left", () => this.move(-1)], ["↻", "Rotate", () => this.rotate()], ["→", "Move right", () => this.move(1)],
         ["↓", "Soft drop", () => this.softDrop()], ["⏸", this.app.t("pause"), () => this.togglePause()], ["⤓", "Hard drop", () => this.hardDrop()],
-        ["↺", this.app.t("newGame"), () => { this.dropInterval = 620; this.resetState(); this.lastTick = Date.now(); this.draw(); }],
+        ["↺", this.app.t("newGame"), () => { this.dropInterval = 620; this.resetState(); this.lastTick = performance.now(); this.draw(); }],
       ];
       definitions.forEach(([symbol, label, handler]) => {
         const button = create("button", null, symbol);
@@ -1012,16 +1128,17 @@
       return node;
     }
 
-    tick() {
-      const now = Date.now();
-      const delta = Math.min(now - this.lastTick, 250);
+    tick(now) {
+      const delta = Math.min(Math.max(0, now - this.lastTick), 250);
       this.lastTick = now;
-      if (this.paused || this.over) return;
-      this.elapsed += delta;
-      if (this.elapsed >= this.dropInterval) {
-        this.elapsed %= this.dropInterval;
-        this.stepDown();
+      if (!this.paused && !this.over && !this.backgrounded) {
+        this.elapsed += delta;
+        if (this.elapsed >= this.dropInterval) {
+          this.elapsed %= this.dropInterval;
+          this.stepDown();
+        }
       }
+      this.animationFrame = window.requestAnimationFrame((time) => this.tick(time));
     }
 
     valid(piece, rowOffset = 0, columnOffset = 0, shape = piece.shape) {
@@ -1134,7 +1251,7 @@
       if (this.over) return;
       this.paused = !this.paused;
       this.elapsed = 0;
-      this.lastTick = Date.now();
+      this.lastTick = performance.now();
       this.draw();
     }
 
@@ -1157,7 +1274,7 @@
         modal.remove();
         this.dropInterval = 620;
         this.resetState();
-        this.lastTick = Date.now();
+        this.lastTick = performance.now();
         this.draw();
       });
       sheet.append(again);
@@ -1165,8 +1282,13 @@
       this.app.root.append(modal);
     }
 
+    setActive(active) {
+      this.backgrounded = !active;
+      this.lastTick = performance.now();
+    }
+
     destroy() {
-      window.clearInterval(this.dropTimer);
+      window.cancelAnimationFrame(this.animationFrame);
       window.removeEventListener("keydown", this.boundKeyDown);
     }
   }
@@ -1182,10 +1304,11 @@
       this.notes = Array.from({ length: 81 }, () => new Set());
       this.wrong = new Set(); this.noteMode = false; this.mistakes = 0; this.elapsed = 0;
       const holes = { easy: 30, medium: 40, hard: 50, extreme: 58 }[level];
-      [...Array(81).keys()].sort(() => Math.random() - 0.5).slice(0, holes).forEach((index) => { this.board[index] = 0; });
+      shuffle([...Array(81).keys()]).slice(0, holes).forEach((index) => { this.board[index] = 0; });
       this.board.forEach((value, index) => { if (value) this.given.add(index); });
       this.renderShell();
-      this.timer = window.setInterval(() => { if (!this.complete) { this.elapsed += 1; this.timeNode.textContent = this.formatTime(this.elapsed); } }, 1000);
+      this.backgrounded = document.hidden;
+      this.timer = window.setInterval(() => { if (!this.complete && !this.backgrounded) { this.elapsed += 1; this.timeNode.textContent = this.formatTime(this.elapsed); } }, 1000);
     }
 
     renderShell() {
@@ -1257,6 +1380,7 @@
       if (!this.board.every(Boolean) || !this.board.every((value, index) => value === this.solution[index])) return;
       this.complete = true; window.clearInterval(this.timer); const previous = storage.value.sudokuBest[this.level] || Infinity; if (this.elapsed < previous) storage.value.sudokuBest[this.level] = this.elapsed; storage.save(); this.bestNode.textContent = this.formatTime(storage.value.sudokuBest[this.level]); this.notice = create("div", "notice", `${this.app.t("congratulations")} ${this.formatTime(this.elapsed)}`); this.boardNode.after(this.notice); this.app.award("sudoku", Math.max(20, 120 - this.elapsed));
     }
+    setActive(active) { this.backgrounded = !active; }
     destroy() { window.clearInterval(this.timer); }
   }
 
