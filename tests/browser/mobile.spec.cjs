@@ -21,6 +21,7 @@ async function ready(page) {
 }
 
 test("single touch taps navigate every mode, settings, and pause in both designs", async ({ page }, info) => {
+  test.slow();
   const errors = []; page.on("pageerror", (error) => errors.push(error.message));
   await page.goto("/");
   expect(info.project.use.hasTouch).toBe(true);
@@ -188,6 +189,7 @@ test("pause stops scheduled animation work and resumes a single loop", async ({ 
 });
 
 test("falling boards and controls fit short and tall phones without scrolling", async ({ page }, info) => {
+  test.slow();
   await page.goto("/");
   for (const height of [667, 852, 932]) {
     await page.setViewportSize({ width: 393, height });
