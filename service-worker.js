@@ -1,10 +1,12 @@
-const CACHE = "blockable-1.6.1";
+const VERSION = "1.6.2";
+const CACHE = `blockable-${VERSION}`;
 const ASSETS = [
   "./",
   "./index.html",
   "./styles.css",
   "./game.js",
   "./game-core.js",
+  "./app-updates.js",
   "./vendor/sudoku.js",
   "./version.json",
   "./manifest.webmanifest",
@@ -15,29 +17,31 @@ const ASSETS = [
   "./Assets/pwa/app-192.png",
   "./Assets/pwa/app-512.png",
   "./Assets/pwa/maskable-192.png",
-  "./Assets/pwa/maskable-512.png",
-  "./Assets/BlockableIcon.svg.png",
-  "./Assets/BlockableMinimalIcon.png",
-  "./Assets/pwa/minimal-192.png",
-  "./Assets/pwa/minimal-512.png",
-  "./Assets/pwa/glossy-192.png",
-  "./Assets/pwa/glossy-512.png"
+  "./Assets/pwa/maskable-512.png"
 ];
 
 self.addEventListener("install", (event) => {
-  event.waitUntil(caches.open(CACHE).then((cache) => cache.addAll(ASSETS)));
-  self.skipWaiting();
+  event.waitUntil((async () => {
+    const cache = await caches.open(CACHE);
+    try {
+      await cache.addAll(ASSETS.map((url) => new Request(url, { cache: "reload" })));
+      await self.skipWaiting();
+    } catch (error) {
+      await caches.delete(CACHE);
+      throw error;
+    }
+  })());
 });
 
 self.addEventListener("activate", (event) => {
   event.waitUntil(
-    caches.keys().then((keys) => Promise.all(keys.filter((key) => key.startsWith("blockable-") && key !== CACHE).map((key) => caches.delete(key))))
+    caches.keys().then((keys) => Promise.all(keys.filter((key) => key.startsWith("blockable-") && key !== CACHE).map((key) => caches.delete(key)))).then(() => self.clients.claim())
   );
-  self.clients.claim();
 });
 
 self.addEventListener("message", (event) => {
   if (event.data?.type === "SKIP_WAITING") self.skipWaiting();
+  if (event.data?.type === "GET_VERSION") event.ports[0]?.postMessage({ version: VERSION });
 });
 
 self.addEventListener("fetch", (event) => {

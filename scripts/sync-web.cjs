@@ -8,6 +8,7 @@ const files = [
   "styles.css",
   "game.js",
   "game-core.js",
+  "app-updates.js",
   "version.json",
   "manifest.webmanifest",
   "manifest-3d.webmanifest",

@@ -1,7 +1,9 @@
 # Blockable
 An offline-capable puzzle collection for web, macOS, Windows, and locally bundled iOS/Android projects.
 
-## Version 1.6.1
+## Version 1.6.2
+
+Mobile stability fixes include actionable in-app web updates, stable touch targets, captured drag gestures, held movement controls, viewport-aware falling boards, and paused animation cleanup. See [the mobile stability checklist](MOBILE_STABILITY_CHECKLIST.md) for the audit and physical-device checks still required.
 
 Puzzle Loop is the official app icon across Minimal and 3D styles, macOS, Windows, iOS, Android, and Home Screen web apps. The approved source is preserved under `Assets/BlockablePuzzleLoopSource.png`; `npm run icons` reproducibly exports platform sizes and the macOS ICNS without regenerating the artwork.
 

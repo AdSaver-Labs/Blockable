@@ -4,6 +4,16 @@ const { SandBoard, SessionStore, CONFIG, DIFFICULTIES, validState } = require(".
 const { getSudoku } = require("sudoku-gen");
 const sharp = require("sharp");
 const path = require("node:path");
+const { newer } = require("../app-updates.js");
+
+test("updates compare semantic versions without downgrading or accepting invalid releases", () => {
+  assert.equal(newer("1.6.3", "1.6.2"), true);
+  assert.equal(newer("1.10.0", "1.9.9"), true);
+  assert.equal(newer("2.0.0", "1.99.99"), true);
+  assert.equal(newer("1.6.2", "1.6.2"), false);
+  assert.equal(newer("1.6.1", "1.6.2"), false);
+  assert.equal(newer("bad", "1.6.2"), false);
+});
 
 test("official platform icons have correct sizes, opaque phone artwork, and transparent desktop corners", async () => {
   const root = path.resolve(__dirname, "..");
@@ -101,6 +111,16 @@ test("quota failures preserve earlier in-memory saves", () => {
   assert.equal(store.save(mergeSave("b", "hard")), false);
   assert.equal(store.sessions.length, 1);
   assert.equal(store.sessions[0].id, "a");
+});
+
+test("removing a nonexistent completed session does not rewrite every save", () => {
+  const adapter = memory(); let writes = 0;
+  const write = adapter.setItem; adapter.setItem = (...args) => { writes += 1; write(...args); };
+  const store = new SessionStore(adapter);
+  store.save(mergeSave("a", "easy"));
+  assert.equal(store.remove("missing"), true);
+  assert.equal(writes, 1);
+  assert.equal(store.sessions.length, 1);
 });
 
 test("all difficulties have distinct gameplay parameters", () => {

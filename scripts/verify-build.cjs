@@ -5,7 +5,7 @@ const { execFileSync } = require("node:child_process");
 
 const root = path.resolve(__dirname, "..");
 const required = [
-  "index.html", "styles.css", "game.js", "game-core.js", "vendor/sudoku.js", "service-worker.js", "version.json",
+  "index.html", "styles.css", "game.js", "game-core.js", "app-updates.js", "vendor/sudoku.js", "service-worker.js", "version.json",
   "manifest.webmanifest", "manifest-3d.webmanifest", "electron-main.cjs",
   "capacitor.config.json", "Assets/BlockableMinimalIcon.png", "Assets/BlockableIcon.svg.png",
   "Assets/BlockableAppIcon.png", "Assets/BlockableDesktopIcon.png", "Assets/pwa/apple-touch-icon.png",
@@ -17,6 +17,7 @@ const required = [
 for (const file of required) assert.ok(fs.existsSync(path.join(root, file)), `Missing ${file}`);
 execFileSync(process.execPath, ["--check", path.join(root, "game.js")], { stdio: "inherit" });
 execFileSync(process.execPath, ["--check", path.join(root, "game-core.js")], { stdio: "inherit" });
+execFileSync(process.execPath, ["--check", path.join(root, "app-updates.js")], { stdio: "inherit" });
 execFileSync(process.execPath, ["--check", path.join(root, "electron-main.cjs")], { stdio: "inherit" });
 
 const version = JSON.parse(fs.readFileSync(path.join(root, "version.json"), "utf8")).version;

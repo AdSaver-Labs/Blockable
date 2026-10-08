@@ -1,7 +1,7 @@
 (() => {
   "use strict";
 
-  const VERSION = "1.6.1";
+  const VERSION = "1.6.2";
   const { DIFFICULTIES, MODES, CONFIG, SandBoard, SessionStore } = window.BlockableCore;
   const BOARD_SIZE = 8;
   const COLORS = ["#2383e2", "#0f9d76", "#e89a3c", "#d45d79", "#8b78e6"];
@@ -67,9 +67,11 @@
     },
   };
   Object.assign(COPY.en, {
+    updateNow: "Update now", checkingUpdate: "Checking for updates...", installingUpdate: "Downloading update...", updateReady: "Version {version} is ready. Your game will be saved before restarting.", retryUpdate: "Try again", later: "Later", nativeUpdate: "Download the new desktop release, or rebuild your native phone app to install this update.", openRelease: "Open downloads",
     sand: "Sand Blocks", sandSub: "Turn falling blocks into flowing color.", veryHard: "Very Hard", continue: "Continue", unfinished: "Unfinished games", saveHome: "Save & home", delete: "Delete", deleteSave: "Delete this saved game?", mixedColors: "Mixed-color pieces", noSaved: "No unfinished games", checkUpdates: "Check for updates", difficulty: "Difficulty", pausedSaved: "Your game is saved.", resume: "Resume", moveLeft: "Move left", moveRight: "Move right", rotate: "Rotate", softDrop: "Soft drop", hardDrop: "Hard drop", saveFailed: "This game could not be saved. Free some device storage and try again.",
   });
   Object.assign(COPY.bg, {
+    updateNow: "Актуализирай сега", checkingUpdate: "Проверка за актуализации...", installingUpdate: "Изтегляне на актуализация...", updateReady: "Версия {version} е готова. Играта ще бъде запазена преди рестарт.", retryUpdate: "Опитай пак", later: "По-късно", nativeUpdate: "Изтегли новата настолна версия или компилирай и инсталирай отново нативното приложение за телефон.", openRelease: "Отвори изтеглянията",
     sand: "Пясъчни блокове", sandSub: "Превърни падащите блокове в цветен пясък.", veryHard: "Много трудно", continue: "Продължи", unfinished: "Незавършени игри", saveHome: "Запази и начало", delete: "Изтрий", deleteSave: "Да се изтрие ли запазената игра?", mixedColors: "Многоцветни фигури", noSaved: "Няма незавършени игри", checkUpdates: "Провери за актуализации", difficulty: "Трудност", pausedSaved: "Играта е запазена.", resume: "Продължи", moveLeft: "Наляво", moveRight: "Надясно", rotate: "Завърти", softDrop: "Спусни", hardDrop: "Пусни долу", saveFailed: "Играта не може да бъде запазена. Освободи място и опитай пак.",
   });
 
@@ -150,6 +152,7 @@
       this.userPaused = false;
       this.backgrounded = document.hidden;
       this.sessions = new SessionStore({ getItem: (key) => localStorage.getItem(key), setItem: (key, value) => localStorage.setItem(key, value) });
+      this.pressControls = new Set();
       this.boundVisibilityChange = () => this.setActive(!document.hidden);
     }
 
@@ -158,37 +161,40 @@
     }
 
     init() {
+      if ("scrollRestoration" in history) history.scrollRestoration = "manual";
       storage.load();
       this.applySettings();
       this.showHome();
       document.addEventListener("visibilitychange", this.boundVisibilityChange);
       window.addEventListener("pagehide", () => this.setActive(false));
-      window.addEventListener("pageshow", () => this.setActive(!document.hidden));
+      window.addEventListener("pageshow", () => { this.setActive(!document.hidden); if (!this.game) window.scrollTo(0, 0); });
       window.addEventListener("beforeunload", () => this.saveSession());
       this.autosaveTimer = window.setInterval(() => this.saveSession(), 5000);
-      this.registerServiceWorker();
+      this.updater = new window.BlockableUpdates.Updater({ version: VERSION, native: window.Capacitor?.isNativePlatform?.() === true, onState: (state) => this.renderUpdate(state), save: () => this.saveSession(), reload: () => location.reload() });
+      this.modalObserver = new MutationObserver(() => this.syncGameActivity());
+      this.modalObserver.observe(this.root, { childList: true });
     }
 
     setActive(active) {
       this.backgrounded = !active;
-      this.root.dataset.paused = String(!active);
-      this.game?.setActive?.(active);
+      this.syncGameActivity();
       if (!active) this.saveSession();
       if (!this.audioContext) return;
       if (active && storage.value.sound) this.audioContext.resume().catch(() => {});
       if (!active) this.audioContext.suspend().catch(() => {});
     }
 
-    registerServiceWorker() {
-      const native = window.Capacitor?.isNativePlatform?.() === true;
-      if (!native && "serviceWorker" in navigator && /^https?:$/.test(location.protocol)) {
-        const wasControlled = Boolean(navigator.serviceWorker.controller);
-        let refreshed = false;
-        navigator.serviceWorker.addEventListener("controllerchange", () => {
-          if (wasControlled && !refreshed) { refreshed = true; this.saveSession(); location.reload(); }
-        });
-        navigator.serviceWorker.register("./service-worker.js").catch(() => {});
-      }
+    syncGameActivity() {
+      const active = !this.isGameBlocked();
+      this.root.dataset.paused = String(!active);
+      if (!active) this.stopInputs();
+      this.game?.setActive?.(active);
+    }
+
+    stopInputs() {
+      this.game?.cleanupDrag?.();
+      this.game?.cancelGesture?.();
+      for (const control of this.pressControls) control.cancel();
     }
 
     applySettings() {
@@ -216,6 +222,9 @@
 
     clear() {
       this.saveSession();
+      this.stopInputs();
+      for (const control of this.pressControls) control.destroy();
+      this.pressControls.clear();
       this.game?.destroy();
       this.game = null;
       this.currentSession = null;
@@ -227,16 +236,23 @@
     isGameBlocked() { return this.userPaused || this.backgrounded || Boolean(this.root.querySelector(".modal")); }
 
     saveSession() {
+      clearTimeout(this.saveTimer);
+      this.saveTimer = null;
       if (!this.game || !this.currentSession || !this.game.serialize) return true;
       if (this.game.over || this.game.done || this.game.complete) return this.sessions.remove(this.currentSession.id);
       const state = this.game.serialize();
       return this.sessions.save({ ...this.currentSession, updatedAt: Date.now(), state });
     }
 
+    requestSave() {
+      if (this.saveTimer) return;
+      this.saveTimer = setTimeout(() => { if (!this.saveSession()) this.toast(this.t("saveFailed")); }, 350);
+    }
+
     pauseGame() {
       if (!this.game || this.game.over || this.game.done || this.game.complete) return;
       this.userPaused = true;
-      this.game.cleanupDrag?.();
+      this.stopInputs();
       this.game.setActive?.(false);
       const saved = this.saveSession();
       const modal = create("div", "modal");
@@ -320,7 +336,9 @@
 
     sound(frequency = 320, duration = 0.06) {
       if (!storage.value.sound) return;
+      if (!window.AudioContext && !window.webkitAudioContext) return;
       this.audioContext ||= new (window.AudioContext || window.webkitAudioContext)();
+      if (this.audioContext.state === "suspended") this.audioContext.resume().catch(() => {});
       const oscillator = this.audioContext.createOscillator();
       const gain = this.audioContext.createGain();
       oscillator.frequency.value = frequency;
@@ -330,15 +348,77 @@
       oscillator.start();
       gain.gain.exponentialRampToValueAtTime(0.0001, this.audioContext.currentTime + duration);
       oscillator.stop(this.audioContext.currentTime + duration);
+      oscillator.onended = () => { oscillator.disconnect(); gain.disconnect(); };
     }
 
-    iconButton(label, symbol, handler) {
+    bindPress(button, handler, repeat = false) {
+      let pointer = null; let timer = null; let suppressUntil = 0;
+      const events = new AbortController();
+      const cancel = () => {
+        clearTimeout(timer); timer = null;
+        if (pointer !== null && button.hasPointerCapture(pointer)) button.releasePointerCapture(pointer);
+        pointer = null; button.classList.remove("pressed");
+      };
+      button.addEventListener("pointerdown", (event) => {
+        if (event.isPrimary === false || event.button !== 0 || pointer !== null || this.isGameBlocked()) return;
+        event.preventDefault(); pointer = event.pointerId; suppressUntil = performance.now() + 700;
+        button.setPointerCapture(pointer); button.classList.add("pressed"); handler();
+        if (repeat) {
+          const step = () => {
+            if (pointer === null || this.isGameBlocked()) { cancel(); return; }
+            handler(); timer = setTimeout(step, 80);
+          };
+          timer = setTimeout(step, 280);
+        }
+      }, { signal: events.signal });
+      for (const name of ["pointerup", "pointercancel", "lostpointercapture"]) button.addEventListener(name, (event) => { if (event.pointerId === pointer) { suppressUntil = performance.now() + 700; cancel(); } }, { signal: events.signal });
+      button.addEventListener("click", (event) => { if (event.detail > 0 && performance.now() < suppressUntil) return; if (!this.isGameBlocked()) handler(); }, { signal: events.signal });
+      window.addEventListener("blur", cancel, { signal: events.signal });
+      const control = { cancel, destroy: () => { cancel(); events.abort(); } };
+      this.pressControls.add(control);
+      return button;
+    }
+
+    iconButton(label, symbol, handler, press = null) {
       const button = create("button", "icon-button", symbol);
       button.type = "button";
       button.title = label;
       button.setAttribute("aria-label", label);
-      button.addEventListener("click", handler);
+      if (press) this.bindPress(button, handler, press.repeat);
+      else button.addEventListener("click", handler);
       return button;
+    }
+
+    bindBoardGesture(board, game, units, getX, setX) {
+      let gesture = null;
+      const events = new AbortController();
+      const cancel = () => {
+        const id = gesture?.id; gesture = null;
+        if (id !== undefined && board.hasPointerCapture(id)) board.releasePointerCapture(id);
+      };
+      board.addEventListener("pointerdown", (event) => {
+        if (gesture || event.isPrimary === false || event.button !== 0 || game.over || this.isGameBlocked()) return;
+        gesture = { id: event.pointerId, x: event.clientX, y: event.clientY, start: getX(), piece: game.current };
+        board.setPointerCapture(event.pointerId);
+      }, { signal: events.signal });
+      board.addEventListener("pointermove", (event) => {
+        if (!gesture || event.pointerId !== gesture.id) return;
+        if (game.current !== gesture.piece || this.isGameBlocked()) { cancel(); return; }
+        const dx = event.clientX - gesture.x;
+        setX(Math.round(gesture.start + dx * units / board.getBoundingClientRect().width));
+      }, { signal: events.signal });
+      board.addEventListener("pointerup", (event) => {
+        if (!gesture || event.pointerId !== gesture.id) return;
+        const { x, y, piece } = gesture; cancel();
+        if (game.current !== piece || this.isGameBlocked()) return;
+        const dx = event.clientX - x; const dy = event.clientY - y;
+        if (dy > 45 && dy > Math.abs(dx)) game.hardDrop();
+        else if (Math.hypot(dx, dy) < 8) game.rotate();
+      }, { signal: events.signal });
+      for (const name of ["pointercancel", "lostpointercapture"]) board.addEventListener(name, (event) => { if (event.pointerId === gesture?.id) cancel(); }, { signal: events.signal });
+      const control = { cancel, destroy: () => { cancel(); events.abort(); } };
+      this.pressControls.add(control);
+      return cancel;
     }
 
     header(title) {
@@ -391,7 +471,7 @@
       });
 
       const footer = create("footer", "home-footer");
-      const update = create("button", "choice", this.t("checkUpdates"));
+      const update = create("button", "choice update-check", this.t("checkUpdates"));
       update.addEventListener("click", () => this.checkForUpdates());
       const level = Math.floor(storage.value.xp / 100) + 1;
       footer.append(create("span", null, `v${VERSION} · ${this.t("levelName")} ${level} · ${storage.value.xp} ${this.t("xp")}`), update);
@@ -406,26 +486,41 @@
     }
 
     async checkForUpdates() {
-      try {
-        const response = await fetch("./version.json", { cache: "no-store" });
-        if (!response.ok) throw new Error(`HTTP ${response.status}`);
-        const release = await response.json();
-        if (release.version !== VERSION && "serviceWorker" in navigator) {
-          const registration = await navigator.serviceWorker.getRegistration();
-          await registration?.update();
-        }
-        const message = release.version === VERSION
-          ? this.t("current")
-          : this.t("updateAvailable").replace("{version}", release.version);
-        this.toast(message);
-      } catch {
-        this.toast(location.protocol === "file:" ? this.t("current") : this.t("updateFailed"));
-      }
+      await this.updater.check();
     }
 
-    openSettings() {
+    renderUpdate(state) {
+      const pending = ["checking", "updating"].includes(state.status);
+      this.root.querySelectorAll(".update-check").forEach((button) => { button.disabled = pending; button.textContent = this.t(pending ? "checkingUpdate" : "checkUpdates"); });
+      if (state.status === "current") { this.root.querySelector(".update-modal")?.remove(); this.toast(this.t("current")); return; }
+      if (state.status === "idle") return;
+      let modal = this.root.querySelector(".update-modal");
+      if (!modal) {
+        this.stopInputs();
+        modal = create("div", "modal update-modal");
+        modal.setAttribute("role", "dialog"); modal.setAttribute("aria-modal", "true"); modal.setAttribute("aria-label", this.t("updates"));
+        modal.append(create("section", "sheet")); this.root.append(modal);
+      }
+      const sheet = modal.firstElementChild; sheet.replaceChildren(create("h2", null, this.t("updates")));
+      const messages = { checking: "checkingUpdate", updating: "installingUpdate", available: "updateReady", native: "nativeUpdate", error: "updateFailed", saveError: "saveFailed" };
+      const message = create("p", "update-status", this.t(messages[state.status]).replace("{version}", state.version || ""));
+      message.setAttribute("role", "status"); message.setAttribute("aria-live", "polite"); sheet.append(message);
+      const actions = create("div", "sheet-footer");
+      if (!pending) {
+        const later = create("button", "secondary", this.t("later")); later.addEventListener("click", () => modal.remove()); actions.append(later);
+        const action = create("button", "primary", this.t(state.status === "available" || state.status === "saveError" ? "updateNow" : state.status === "native" ? "openRelease" : "retryUpdate"));
+        action.addEventListener("click", () => {
+          if (state.status === "native") window.open("https://github.com/AdSaver-Labs/Blockable/releases/latest", "_blank", "noopener");
+          else if (state.status === "available" || state.status === "saveError") this.updater.apply();
+          else this.updater.check();
+        }); actions.append(action);
+      }
+      sheet.append(actions);
+    }
+
+    openSettings(scrollTop = 0) {
       this.saveSession();
-      this.game?.cleanupDrag?.();
+      this.stopInputs();
       const modal = create("div", "modal");
       const sheet = create("section", "sheet");
       sheet.setAttribute("role", "dialog");
@@ -434,7 +529,9 @@
 
       const addSetting = (label, control, hint = "") => {
         const row = create("div", "setting");
-        row.append(create("label", null, label), create("span", "hint", hint), control);
+        const labelNode = create("label", null, label);
+        if (control.matches("input")) { control.id ||= `setting-${sheet.children.length}`; labelNode.htmlFor = control.id; }
+        row.append(labelNode, create("span", "hint", hint), control);
         sheet.append(row);
       };
       const choices = (values, current, onChange) => {
@@ -444,8 +541,9 @@
           button.type = "button";
           button.addEventListener("click", () => {
             onChange(value);
+            const position = sheet.scrollTop;
             modal.remove();
-            this.openSettings();
+            this.openSettings(position);
           });
           row.append(button);
         });
@@ -491,8 +589,9 @@
           storage.value.wallpaper = "paper";
           storage.save();
           this.applySettings();
+          const position = sheet.scrollTop;
           modal.remove();
-          this.openSettings();
+          this.openSettings(position);
         });
         uploadRow.append(remove);
       }
@@ -507,7 +606,7 @@
         addSetting(label, toggle);
       });
 
-      const check = create("button", "secondary", this.t("checkUpdates"));
+      const check = create("button", "secondary update-check", this.t("checkUpdates"));
       check.addEventListener("click", () => this.checkForUpdates());
       addSetting(this.t("updates"), check, `v${VERSION}`);
 
@@ -523,6 +622,7 @@
         if (event.target === modal) modal.remove();
       });
       this.root.append(modal);
+      sheet.scrollTop = scrollTop;
     }
 
     saveCustomWallpaper(file, modal) {
@@ -546,8 +646,9 @@
             return;
           }
           this.applySettings();
+          const position = modal.firstElementChild.scrollTop;
           modal.remove();
-          this.openSettings();
+          this.openSettings(position);
         });
         image.src = reader.result;
       });
@@ -623,13 +724,21 @@
           cell.dataset.column = String(column);
           cell.setAttribute("aria-label", `${row + 1}, ${column + 1}`);
           cell.addEventListener("click", () => this.placeSelected(row, column));
-          cell.addEventListener("pointerenter", () => this.preview(row, column));
+          cell.addEventListener("pointerenter", (event) => { if (event.pointerType !== "touch" && !this.drag) this.preview(row, column); });
           this.cells[row][column] = cell;
           this.board.append(cell);
         }
       }
 
       this.tray = create("div", "tray");
+      this.slots = Array.from({ length: 3 }, (_, index) => {
+        const slot = create("button", "piece-slot");
+        slot.type = "button"; slot.dataset.pieceIndex = String(index);
+        slot.setAttribute("aria-label", `${this.app.t("block")} ${index + 1}`);
+        slot.addEventListener("click", () => { if (performance.now() >= (this.suppressClickUntil || 0)) this.select(index); });
+        slot.addEventListener("pointerdown", (event) => this.beginDrag(event, index));
+        this.tray.append(slot); return slot;
+      });
       this.notice = create("div", "notice");
       const actions = create("div", "game-actions");
       const restart = create("button", "secondary", this.app.t("newGame"));
@@ -709,24 +818,18 @@
         cell.style.setProperty("--cell-color", color || "");
       }));
 
-      storage.value.best = Math.max(storage.value.best, this.score);
-      storage.save();
+      if (this.score > storage.value.best) { storage.value.best = this.score; storage.save(); }
       this.scoreNode.textContent = String(this.score);
       this.bestNode.textContent = String(storage.value.best);
 
-      this.tray.replaceChildren();
       this.pieces.forEach((piece, index) => {
         const unavailable = piece.used || !this.hasMove(piece);
-        const slot = create("button", `piece-slot${index === this.selected ? " selected" : ""}${unavailable ? " dead" : ""}`);
-        slot.type = "button";
-        slot.dataset.pieceIndex = String(index);
-        slot.setAttribute("aria-label", `${this.app.t("block")} ${index + 1}`);
-        if (!piece.used) {
-          slot.append(this.pieceNode(piece));
-          slot.addEventListener("click", () => this.select(index));
-          slot.addEventListener("pointerdown", (event) => this.beginDrag(event, index));
+        const slot = this.slots[index];
+        slot.className = `piece-slot${index === this.selected ? " selected" : ""}${unavailable ? " dead" : ""}`;
+        if (slot.renderedPiece !== piece || slot.renderedUsed !== piece.used) {
+          slot.replaceChildren(); if (!piece.used) slot.append(this.pieceNode(piece));
+          slot.renderedPiece = piece; slot.renderedUsed = piece.used;
         }
-        this.tray.append(slot);
       });
     }
 
@@ -736,19 +839,30 @@
       const piece = this.pieces[index];
       if (!piece || piece.used || this.locked) return;
       this.selected = index;
-      this.draw();
+      this.slots.forEach((slot, target) => slot.classList.toggle("selected", target === index));
     }
 
     beginDrag(event, index) {
       if (this.app.isGameBlocked() || this.over) return;
+      if (event.isPrimary === false || this.drag) return;
       if (event.button !== undefined && event.button !== 0) return;
       const piece = this.pieces[index];
       if (!piece || piece.used || this.locked) return;
       event.preventDefault();
       this.selected = index;
+      this.slots.forEach((slot, target) => slot.classList.toggle("selected", target === index));
       const ghost = this.pieceNode(piece);
       ghost.classList.add("drag-ghost");
+      const first = this.cells[0][0].getBoundingClientRect();
+      const second = this.cells[0][1].getBoundingClientRect();
+      const pitch = second.left - first.left;
+      const width = (piece.shape[0].length - 1) * pitch + first.width;
+      const height = (piece.shape.length - 1) * pitch + first.height;
+      ghost.style.gridTemplateColumns = `repeat(${piece.shape[0].length}, ${first.width}px)`;
+      ghost.style.gap = `${pitch - first.width}px`;
+      ghost.style.width = `${width}px`; ghost.style.height = `${height}px`;
       document.body.append(ghost);
+      event.currentTarget.setPointerCapture(event.pointerId);
       this.drag = {
         index,
         piece,
@@ -758,11 +872,15 @@
         startY: event.clientY,
         moved: false,
         target: null,
+        source: event.currentTarget, pitch, width, height,
+        lift: event.pointerType === "touch" ? 56 : 0,
+        originX: first.left + first.width / 2, originY: first.top + first.height / 2,
       };
       this.moveGhost(event.clientX, event.clientY);
       window.addEventListener("pointermove", this.onDragMove, { passive: false });
-      window.addEventListener("pointerup", this.onDragEnd, { once: true });
-      window.addEventListener("pointercancel", this.onDragCancel, { once: true });
+      window.addEventListener("pointerup", this.onDragEnd);
+      window.addEventListener("pointercancel", this.onDragCancel);
+      this.drag.source.addEventListener("lostpointercapture", this.onDragCancel);
     }
 
     onDragMove = (event) => {
@@ -770,29 +888,41 @@
       event.preventDefault();
       if (Math.hypot(event.clientX - this.drag.startX, event.clientY - this.drag.startY) > 5) this.drag.moved = true;
       this.moveGhost(event.clientX, event.clientY);
-      const pointY = event.pointerType === "touch" ? event.clientY - 52 : event.clientY;
-      this.drag.target = this.cellAtPoint(event.clientX, pointY);
-      if (this.drag.target) this.preview(this.drag.target.row, this.drag.target.column, this.drag.piece);
-      else this.clearPreview();
+      const pointX = event.clientX - (this.drag.piece.shape[0].length - 1) * this.drag.pitch / 2;
+      const pointY = event.clientY - this.drag.lift - (this.drag.piece.shape.length - 1) * this.drag.pitch / 2;
+      this.drag.target = this.cellAtPoint(pointX, pointY);
+      if (!this.previewFrame) this.previewFrame = requestAnimationFrame(() => {
+        this.previewFrame = null;
+        if (!this.drag) return;
+        if (this.drag.target) this.preview(this.drag.target.row, this.drag.target.column, this.drag.piece);
+        else this.clearPreview();
+      });
     };
 
     onDragEnd = (event) => {
       if (!this.drag || event.pointerId !== this.drag.pointerId) return;
       const { index, target, moved } = this.drag;
+      this.suppressClickUntil = performance.now() + 700;
       this.cleanupDrag();
       if (moved && target && this.canPlace(this.pieces[index].shape, target.row, target.column)) {
         this.place(index, target.row, target.column);
       } else if (!moved) {
         this.selected = index;
-        this.draw();
+        this.slots.forEach((slot, targetIndex) => slot.classList.toggle("selected", targetIndex === index));
       }
     };
 
-    onDragCancel = () => this.cleanupDrag();
+    onDragCancel = (event) => { if (event.pointerId === this.drag?.pointerId) this.cleanupDrag(); };
 
     cleanupDrag() {
-      this.drag?.ghost.remove();
+      const drag = this.drag;
       this.drag = null;
+      if (drag) {
+        drag.source.removeEventListener("lostpointercapture", this.onDragCancel);
+        if (drag.source.hasPointerCapture(drag.pointerId)) drag.source.releasePointerCapture(drag.pointerId);
+        drag.ghost.remove();
+      }
+      cancelAnimationFrame(this.previewFrame); this.previewFrame = null;
       this.clearPreview();
       window.removeEventListener("pointermove", this.onDragMove);
       window.removeEventListener("pointerup", this.onDragEnd);
@@ -801,21 +931,24 @@
 
     moveGhost(x, y) {
       if (!this.drag) return;
-      this.drag.ghost.style.left = `${x}px`;
-      this.drag.ghost.style.top = `${y}px`;
+      this.drag.ghost.style.left = `${x - this.drag.width / 2}px`;
+      this.drag.ghost.style.top = `${y - this.drag.lift - this.drag.height / 2}px`;
     }
 
     cellAtPoint(x, y) {
-      const cell = document.elementFromPoint(x, y)?.closest(".block-cell");
-      if (!cell || !this.board.contains(cell)) return null;
-      return { row: Number(cell.dataset.row), column: Number(cell.dataset.column) };
+      const geometry = this.drag;
+      if (!geometry) return null;
+      const row = Math.round((y - geometry.originY) / geometry.pitch);
+      const column = Math.round((x - geometry.originX) / geometry.pitch);
+      return row >= 0 && column >= 0 && row < BOARD_SIZE && column < BOARD_SIZE ? { row, column } : null;
     }
 
   clearPreview() {
-      this.cells.flat().forEach((cell) => {
+      for (const cell of this.previewCells || []) {
         cell.classList.remove("preview-good", "preview-bad");
         cell.style.removeProperty("--preview-color");
-      });
+      }
+      this.previewCells = [];
     }
 
     preview(row, column, explicitPiece = null) {
@@ -826,6 +959,7 @@
       this.forEachBlock(piece.shape, row, column, (targetRow, targetColumn) => {
         const cell = this.cells[targetRow]?.[targetColumn];
         if (!cell) return;
+        this.previewCells.push(cell);
         cell.classList.add(valid ? "preview-good" : "preview-bad");
         if (valid) cell.style.setProperty("--preview-color", piece.color);
       });
@@ -905,7 +1039,7 @@
         this.notice.textContent = this.app.t("noMoves");
         this.overTimer = window.setTimeout(() => this.showGameOver(), 300);
       }
-      this.app.saveSession();
+      this.app.requestSave();
     }
 
     showGameOver() {
@@ -990,19 +1124,20 @@
         if (map[event.key] && !app.isGameBlocked()) { event.preventDefault(); this.move(map[event.key]); }
       };
       this.board.addEventListener("pointerdown", (event) => {
-        if (app.isGameBlocked()) return;
-        this.swipeStart = [event.clientX, event.clientY];
+        if (app.isGameBlocked() || event.isPrimary === false || event.button !== 0 || this.swipeStart) return;
+        this.swipeStart = { x: event.clientX, y: event.clientY, id: event.pointerId };
         this.board.setPointerCapture(event.pointerId);
       });
       this.board.addEventListener("pointerup", (event) => {
-        if (!this.swipeStart) return;
-        const [startX, startY] = this.swipeStart;
+        if (!this.swipeStart || event.pointerId !== this.swipeStart.id) return;
+        const { x: startX, y: startY } = this.swipeStart;
         this.swipeStart = null;
         const dx = event.clientX - startX; const dy = event.clientY - startY;
         if (Math.max(Math.abs(dx), Math.abs(dy)) < 24) return;
         this.move(Math.abs(dx) > Math.abs(dy) ? (dx > 0 ? "right" : "left") : (dy > 0 ? "down" : "up"));
       });
-      this.board.addEventListener("pointercancel", () => { this.swipeStart = null; });
+      this.board.addEventListener("pointercancel", (event) => { if (event.pointerId === this.swipeStart?.id) this.cancelGesture(); });
+      this.board.addEventListener("lostpointercapture", () => this.cancelGesture());
       window.addEventListener("keydown", this.boundKeyDown);
     }
     addRandom() {
@@ -1011,13 +1146,16 @@
       if (empty.length) { const [r, c] = randomItem(empty); this.grid[r][c] = Math.random() < CONFIG[this.difficulty].fourChance ? 4 : 2; }
     }
     render() {
-      const fragment = document.createDocumentFragment();
-      this.grid.flat().forEach((value) => {
-        const cell = create("div", `arcade-cell merge-cell value-${value || 0}`, value ? String(value) : "");
+      if (!this.cells) {
+        this.cells = Array.from({ length: this.size ** 2 }, () => create("div", "arcade-cell merge-cell"));
+        this.board.append(...this.cells);
+      }
+      this.grid.flat().forEach((value, index) => {
+        const cell = this.cells[index];
+        cell.className = `arcade-cell merge-cell value-${value || 0}`;
+        cell.textContent = value ? String(value) : "";
         cell.style.setProperty("--tile-level", String(Math.log2(value || 1)));
-        fragment.append(cell);
       });
-      this.board.replaceChildren(fragment);
       this.scoreNode.textContent = String(this.score);
     }
     move(direction) {
@@ -1042,10 +1180,11 @@
       else if (!this.grid.some((row, r) => row.some((value, c) => !value || value === this.grid[r + 1]?.[c] || value === row[c + 1]))) {
         this.done = true; this.notice.textContent = this.app.t("gameOver");
       }
-      this.app.saveSession();
+      this.app.requestSave();
     }
     serialize() { return { grid: this.grid, score: this.score }; }
-    destroy() { window.removeEventListener("keydown", this.boundKeyDown); }
+    cancelGesture() { const id = this.swipeStart?.id; this.swipeStart = null; if (id !== undefined && this.board.hasPointerCapture(id)) this.board.releasePointerCapture(id); }
+    destroy() { this.cancelGesture(); window.removeEventListener("keydown", this.boundKeyDown); }
   }
 
   class MinesGame extends ArcadeGridGame {
@@ -1065,8 +1204,8 @@
       this.modeButton.classList.toggle("active", this.action === "flag");
       this.timer = window.setInterval(() => { if (this.started && !this.done && !app.isGameBlocked()) { this.elapsed += 1; this.timeNode.textContent = String(this.elapsed); } }, 1000);
     }
-    toggleAction() { this.action = this.action === "reveal" ? "flag" : "reveal"; this.modeButton.textContent = this.app.t(this.action === "reveal" ? "flag" : "reveal"); this.modeButton.classList.toggle("active", this.action === "flag"); }
-    toggleFlag(index) { if (this.done || this.app.isGameBlocked() || this.revealed.has(index)) return; this.flags.has(index) ? this.flags.delete(index) : this.flags.add(index); this.render(); this.app.saveSession(); }
+    toggleAction() { if (this.app.isGameBlocked()) return; this.action = this.action === "reveal" ? "flag" : "reveal"; this.modeButton.textContent = this.app.t(this.action === "reveal" ? "flag" : "reveal"); this.modeButton.classList.toggle("active", this.action === "flag"); this.app.requestSave(); }
+    toggleFlag(index) { if (this.done || this.app.isGameBlocked() || this.revealed.has(index)) return; this.flags.has(index) ? this.flags.delete(index) : this.flags.add(index); this.render(); this.app.requestSave(); }
     neighbors(index) {
       const r = Math.floor(index / this.size); const c = index % this.size; const out = [];
       for (let dr = -1; dr <= 1; dr += 1) for (let dc = -1; dc <= 1; dc += 1) if (dr || dc) {
@@ -1077,17 +1216,23 @@
     }
     count(index) { return this.neighbors(index).filter((neighbor) => this.mines.has(neighbor)).length; }
     render() {
-      const fragment = document.createDocumentFragment();
+      if (!this.cells) {
+        this.cells = Array.from({ length: this.size ** 2 }, (_, index) => {
+          const cell = create("button", "arcade-cell mine-cell");
+          cell.type = "button";
+          cell.setAttribute("aria-label", `${Math.floor(index / this.size) + 1}, ${index % this.size + 1}`);
+          cell.addEventListener("click", () => this.action === "flag" ? this.toggleFlag(index) : this.reveal(index));
+          cell.addEventListener("contextmenu", (event) => { event.preventDefault(); this.toggleFlag(index); });
+          return cell;
+        });
+        this.board.append(...this.cells);
+      }
       for (let index = 0; index < this.size ** 2; index += 1) {
         const revealed = this.revealed.has(index);
-        const cell = create("button", `arcade-cell mine-cell${revealed ? " revealed" : ""}${this.flags.has(index) ? " flagged" : ""}`, this.flags.has(index) ? "⚑" : revealed && this.mines.has(index) ? "💣" : revealed ? String(this.count(index) || "") : "");
-        cell.type = "button";
-        cell.setAttribute("aria-label", `${Math.floor(index / this.size) + 1}, ${index % this.size + 1}`);
-        cell.addEventListener("click", () => this.action === "flag" ? this.toggleFlag(index) : this.reveal(index));
-        cell.addEventListener("contextmenu", (event) => { event.preventDefault(); this.toggleFlag(index); });
-        fragment.append(cell);
+        const cell = this.cells[index];
+        cell.className = `arcade-cell mine-cell${revealed ? " revealed" : ""}${this.flags.has(index) ? " flagged" : ""}`;
+        cell.textContent = this.flags.has(index) ? "⚑" : revealed && this.mines.has(index) ? "💣" : revealed ? String(this.count(index) || "") : "";
       }
-      this.board.replaceChildren(fragment);
       this.flagNode.textContent = `${this.flags.size} / ${this.mineCount}`;
     }
     reveal(index) {
@@ -1111,7 +1256,7 @@
       }
       this.render();
       if (this.revealed.size >= this.size ** 2 - this.mineCount) this.finish("mines", 60);
-      this.app.saveSession();
+      this.app.requestSave();
     }
     serialize() { return { mines: [...this.mines], revealed: [...this.revealed], flags: [...this.flags], started: this.started, elapsed: this.elapsed, action: this.action }; }
     destroy() { window.clearInterval(this.timer); }
@@ -1160,7 +1305,7 @@
     }
 
     renderShell() {
-      const screen = create("main", "screen");
+      const screen = create("main", "screen tetris-screen");
       screen.append(this.app.header(this.app.t("tetris")));
 
       const stats = create("div", "score-strip");
@@ -1188,19 +1333,26 @@
 
       const controls = create("div", "tetris-controls");
       const definitions = [
-        ["←", "Move left", () => this.move(-1)], ["↻", "Rotate", () => this.rotate()], ["→", "Move right", () => this.move(1)],
-        ["↓", "Soft drop", () => this.softDrop()], ["⏸", this.app.t("pause"), () => this.app.pauseGame()], ["⤓", "Hard drop", () => this.hardDrop()],
-        ["↺", this.app.t("newGame"), () => this.app.launchGame("tetris", this.difficulty)],
+        ["←", "moveLeft", () => this.move(-1), true], ["↻", "rotate", () => this.rotate(), false], ["→", "moveRight", () => this.move(1), true],
+        ["↓", "softDrop", () => this.softDrop(), true], ["⏸", "pause", () => this.app.pauseGame(), null], ["⤓", "hardDrop", () => this.hardDrop(), false],
+        ["↺", "newGame", () => this.app.launchGame("tetris", this.difficulty), null],
       ];
-      definitions.forEach(([symbol, label, handler]) => {
+      definitions.forEach(([symbol, label, handler, repeat]) => {
         const button = create("button", null, symbol);
         button.type = "button";
-        button.setAttribute("aria-label", label);
-        button.addEventListener("click", handler);
+        button.setAttribute("aria-label", this.app.t(label));
+        if (repeat === null) button.addEventListener("click", handler);
+        else this.app.bindPress(button, handler, repeat);
         controls.append(button);
       });
       screen.append(stats, layout, controls);
       this.app.root.append(screen);
+      this.cancelGesture = this.app.bindBoardGesture(this.board, this, this.columns, () => this.current.column, (target) => {
+        target = Math.max(0, Math.min(this.columns - this.current.shape[0].length, target));
+        const direction = Math.sign(target - this.current.column);
+        while (direction && this.current.column !== target && this.valid(this.current, 0, direction)) this.current.column += direction;
+        this.draw();
+      });
       this.draw();
     }
 
@@ -1211,6 +1363,7 @@
     }
 
     tick(now) {
+      this.animationFrame = null;
       const delta = Math.min(Math.max(0, now - this.lastTick), 250);
       this.lastTick = now;
       if (!this.paused && !this.over && !this.backgrounded && !this.app.isGameBlocked()) {
@@ -1220,7 +1373,7 @@
           this.stepDown();
         }
       }
-      this.animationFrame = window.requestAnimationFrame((time) => this.tick(time));
+      if (!this.backgrounded && !this.over) this.animationFrame = window.requestAnimationFrame((time) => this.tick(time));
     }
 
     valid(piece, rowOffset = 0, columnOffset = 0, shape = piece.shape) {
@@ -1238,18 +1391,15 @@
         const row = Math.floor(index / this.columns);
         const column = index % this.columns;
         const color = this.grid[row][column];
-        cell.className = `tet-cell${color ? " filled" : ""}`;
-        cell.style.setProperty("--cell-color", color || "");
-      });
-      this.current.shape.forEach((row, y) => row.forEach((filled, x) => {
-        if (!filled) return;
-        const index = (this.current.row + y) * this.columns + this.current.column + x;
-        const cell = this.cells[index];
-        if (cell) {
-          cell.className = "tet-cell filled active";
-          cell.style.setProperty("--cell-color", this.current.color);
+        const y = row - this.current.row; const x = column - this.current.column;
+        const active = Boolean(this.current.shape[y]?.[x]);
+        const displayed = active ? this.current.color : color || "";
+        const className = `tet-cell${displayed ? " filled" : ""}${active ? " active" : ""}`;
+        if (cell.className !== className) cell.className = className;
+        if (cell.renderedColor !== displayed) {
+          cell.style.setProperty("--cell-color", displayed); cell.renderedColor = displayed;
         }
-      }));
+      });
       this.board.dataset.activeRow = String(this.current.row);
       this.scoreNode.textContent = String(this.score);
       this.linesNode.textContent = String(this.lines);
@@ -1307,6 +1457,7 @@
     }
 
     lockPiece() {
+      this.cancelGesture?.();
       this.current.shape.forEach((row, y) => row.forEach((filled, x) => {
         if (filled) this.grid[this.current.row + y][this.current.column + x] = this.current.color;
       }));
@@ -1329,7 +1480,7 @@
         this.stateNode.textContent = this.app.t("gameOver");
         this.overTimer = window.setTimeout(() => this.showGameOver(), 180);
       }
-      this.app.saveSession();
+      this.app.requestSave();
     }
 
     togglePause() {
@@ -1363,6 +1514,8 @@
     setActive(active) {
       this.backgrounded = !active;
       this.lastTick = performance.now();
+      if (!active) { cancelAnimationFrame(this.animationFrame); this.animationFrame = null; }
+      else if (this.animationFrame === null && !this.over) this.animationFrame = requestAnimationFrame((time) => this.tick(time));
     }
 
     serialize() { return { grid: this.grid, current: this.current, next: this.next, score: this.score, lines: this.lines, elapsed: this.elapsed }; }
@@ -1433,41 +1586,29 @@
       this.stateNode = create("div", "pause-state", this.app.t("running")); side.append(this.stateNode);
       layout.append(frame, side);
       const controls = create("div", "tetris-controls sand-controls");
-      for (const [symbol, label, action] of [
-        ["←", "moveLeft", () => this.move(-1)], ["↻", "rotate", () => this.rotate()], ["→", "moveRight", () => this.move(1)],
-        ["↓", "softDrop", () => this.softDrop()], ["⤓", "hardDrop", () => this.hardDrop()], ["↺", "newGame", () => this.app.launchGame("sand", this.difficulty, null, { mixedColors: this.mixedColors })],
-      ]) controls.append(this.app.iconButton(this.app.t(label), symbol, action));
-      this.canvas.addEventListener("pointerdown", (event) => {
-        if (this.over || this.app.isGameBlocked()) return;
-        this.touchStart = { x: event.clientX, y: event.clientY, pieceX: this.current.x };
-        this.canvas.setPointerCapture(event.pointerId);
-      });
-      this.canvas.addEventListener("pointermove", (event) => {
-        if (!this.touchStart || this.over || this.app.isGameBlocked()) return;
-        const rect = this.canvas.getBoundingClientRect();
-        const target = Math.max(0, Math.min(80 - this.current.shape[0].length * this.blockSize, Math.round(this.touchStart.pieceX + (event.clientX - this.touchStart.x) * 80 / rect.width)));
+      for (const [symbol, label, action, repeat] of [
+        ["←", "moveLeft", () => this.move(-1), true], ["↻", "rotate", () => this.rotate(), false], ["→", "moveRight", () => this.move(1), true],
+        ["↓", "softDrop", () => this.softDrop(), true], ["⤓", "hardDrop", () => this.hardDrop(), false], ["↺", "newGame", () => this.app.launchGame("sand", this.difficulty, null, { mixedColors: this.mixedColors }), null],
+      ]) controls.append(this.app.iconButton(this.app.t(label), symbol, action, repeat === null ? null : { repeat }));
+      this.cancelGesture = this.app.bindBoardGesture(this.canvas, this, 80, () => this.current.x, (target) => {
+        target = Math.max(0, Math.min(80 - this.current.shape[0].length * this.blockSize, target));
         const direction = Math.sign(target - this.current.x);
         while (direction && this.current.x !== target && this.simulation.fits(this.current.shape, this.current.x + direction, this.current.y, this.blockSize)) this.current.x += direction;
         this.draw();
       });
-      this.canvas.addEventListener("pointerup", (event) => {
-        if (!this.touchStart) return;
-        const dx = event.clientX - this.touchStart.x; const dy = event.clientY - this.touchStart.y;
-        this.touchStart = null;
-        if (dy > 45 && dy > Math.abs(dx)) this.hardDrop();
-        else if (Math.hypot(dx, dy) < 8) this.rotate();
-      });
-      this.canvas.addEventListener("pointercancel", () => { this.touchStart = null; });
       screen.append(stats, layout, controls); this.app.root.append(screen);
       this.draw();
     }
 
     tick(time) {
+      this.frame = null;
       const delta = Math.min(50, Math.max(0, time - this.lastFrame));
       this.lastFrame = time;
       if (!this.over && !this.backgrounded && !this.app.isGameBlocked()) {
         this.accumulator += delta;
+        let stepped = false;
         while (this.accumulator >= 1000 / 60) {
+          stepped = true;
           this.accumulator -= 1000 / 60;
           this.simulation.step(); this.simulation.step();
           this.clearClock += 1;
@@ -1482,9 +1623,9 @@
           if (this.over) break;
         }
         this.flash = Math.max(0, this.flash - delta);
-        this.draw();
+        if (stepped) this.draw();
       }
-      this.frame = requestAnimationFrame((nextTime) => this.tick(nextTime));
+      if (!this.backgrounded && !this.over) this.frame = requestAnimationFrame((nextTime) => this.tick(nextTime));
     }
 
     advance(distance) {
@@ -1497,6 +1638,7 @@
     }
 
     lockPiece() {
+      this.cancelGesture?.();
       this.simulation.deposit(this.current.shape, this.current.colors, this.current.x, this.current.y, this.blockSize);
       this.score += 10;
       this.current = this.next; this.next = this.randomPiece();
@@ -1504,7 +1646,7 @@
         this.over = true;
         this.stateNode.textContent = this.app.t("gameOver");
       }
-      this.app.saveSession();
+      this.app.requestSave();
     }
 
     move(direction) {
@@ -1558,9 +1700,10 @@
         }
       }));
       if (this.flash > 0) { this.context.fillStyle = `rgba(255,255,255,${this.flash / 160 * 0.18})`; this.context.fillRect(0, 0, 80, 144); }
-      this.canvas.dataset.grains = String(grains);
-      this.canvas.dataset.activeRow = String(Math.floor(this.current.y));
-      this.scoreNode.textContent = String(this.score); this.clearsNode.textContent = String(this.clears);
+      if (this.canvas.dataset.grains !== String(grains)) this.canvas.dataset.grains = String(grains);
+      if (this.canvas.dataset.activeRow !== String(Math.floor(this.current.y))) this.canvas.dataset.activeRow = String(Math.floor(this.current.y));
+      if (this.scoreNode.textContent !== String(this.score)) this.scoreNode.textContent = String(this.score);
+      if (this.clearsNode.textContent !== String(this.clears)) this.clearsNode.textContent = String(this.clears);
       if (this.renderedNext !== this.next) {
         this.renderedNext = this.next;
         const preview = create("div", "mini-tetromino");
@@ -1573,7 +1716,11 @@
       }
     }
 
-    setActive(active) { this.backgrounded = !active; this.lastFrame = performance.now(); this.touchStart = null; }
+    setActive(active) {
+      this.backgrounded = !active; this.lastFrame = performance.now();
+      if (!active) { this.cancelGesture?.(); cancelAnimationFrame(this.frame); this.frame = null; }
+      else if (this.frame === null && !this.over) this.frame = requestAnimationFrame((time) => this.tick(time));
+    }
     serialize() { return { cells: this.simulation.serialize(), current: this.current, next: this.next, score: this.score, clears: this.clears }; }
     destroy() { cancelAnimationFrame(this.frame); window.removeEventListener("keydown", this.boundKeyDown); }
   }
@@ -1614,7 +1761,7 @@
       const erase = create("button", "secondary", this.app.t("erase"));
       const check = create("button", "primary", this.app.t("check"));
       this.notesButton.classList.toggle("active", this.noteMode);
-      this.notesButton.addEventListener("click", () => { this.noteMode = !this.noteMode; this.notesButton.classList.toggle("active", this.noteMode); this.app.saveSession(); });
+      this.notesButton.addEventListener("click", () => { if (this.app.isGameBlocked()) return; this.noteMode = !this.noteMode; this.notesButton.classList.toggle("active", this.noteMode); this.app.requestSave(); });
       erase.addEventListener("click", () => this.setNumber(0)); check.addEventListener("click", () => this.check());
       actions.append(this.notesButton, erase, check);
       screen.append(stats, this.boardNode, pad, actions);
@@ -1631,18 +1778,25 @@
     formatTime(seconds) { return `${String(Math.floor(seconds / 60)).padStart(2, "0")}:${String(seconds % 60).padStart(2, "0")}`; }
 
     draw() {
-      this.boardNode.replaceChildren();
+      if (!this.cells) {
+        this.cells = Array.from({ length: 81 }, (_, index) => {
+          const button = create("button", "sudoku-cell"); button.type = "button";
+          button.addEventListener("click", () => { if (!this.app.isGameBlocked()) { this.selected = index; this.draw(); } });
+          return button;
+        });
+        this.boardNode.append(...this.cells);
+      }
       this.board.forEach((value, index) => {
         const selectedRow = this.selected !== null && Math.floor(this.selected / 9) === Math.floor(index / 9);
         const selectedColumn = this.selected !== null && this.selected % 9 === index % 9;
         const sameNumber = value && this.selected !== null && value === this.board[this.selected];
         const classes = `sudoku-cell${this.given.has(index) ? " given" : ""}${index === this.selected ? " selected" : ""}${selectedRow ? " row-highlight" : ""}${selectedColumn ? " column-highlight" : ""}${sameNumber ? " same-number" : ""}${this.wrong.has(index) ? " wrong" : ""}`;
         const display = value || (this.notes[index].size ? [...this.notes[index]].sort().join(" ") : "");
-        const button = create("button", classes, display);
+        const button = this.cells[index];
+        if (button.className !== classes) button.className = classes;
+        if (button.textContent !== String(display)) button.textContent = String(display);
         if (this.notes[index].size) button.classList.add("notes-cell");
         button.setAttribute("aria-label", `${Math.floor(index / 9) + 1}, ${index % 9 + 1}${value ? `: ${value}` : ""}`);
-        button.addEventListener("click", () => { if (!this.app.isGameBlocked()) { this.selected = index; this.draw(); } });
-        this.boardNode.append(button);
       });
     }
 
@@ -1658,7 +1812,7 @@
       this.mistakeNode.textContent = String(this.mistakes);
       this.draw();
       this.checkComplete();
-      this.app.saveSession();
+      this.app.requestSave();
     }
 
     check() { if (this.complete || this.app.isGameBlocked()) return; this.board.forEach((value, index) => { if (!this.given.has(index) && value && value !== this.solution[index]) this.wrong.add(index); }); this.mistakes += this.wrong.size ? 1 : 0; this.mistakeNode.textContent = String(this.mistakes); this.draw(); this.checkComplete(); this.app.saveSession(); }

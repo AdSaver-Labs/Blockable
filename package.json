@@ -1,6 +1,6 @@
 {
   "name": "blockable-desktop",
-  "version": "1.6.1",
+  "version": "1.6.2",
   "description": "Blockable desktop game collection",
   "private": true,
   "main": "electron-main.cjs",

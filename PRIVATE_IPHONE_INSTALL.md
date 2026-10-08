@@ -25,7 +25,9 @@ Apple sources: [Account and Personal Team limits](https://developer.apple.com/he
 
 ### Updating an Existing Home Screen App
 
-Open the installed Home Screen app while online, use Check for updates, then close and reopen it. Verify that the menu footer shows version 1.6.1. Existing settings and saved games are not reset by the update.
+For the one-time migration from 1.6.1 or earlier, fully close the Home Screen app and reopen it while online. Check for updates, then close/reopen once more if the old client only shows a notice. Verify that the footer shows 1.6.2. Do not delete the app or clear website data to update it.
+
+From 1.6.2 onward, Check for updates opens an actionable dialog. Tap Update now; the app verifies the downloaded worker, saves your current game, and restarts. Failed checks/downloads offer Try again, and a save failure prevents the restart. Existing settings and saved games are not reset.
 
 iOS may keep the icon artwork that was captured when you first added the app. If it stays old, open the current site in Safari and use Share > Add to Home Screen again. Keep the old installation until you have verified the new icon and your saves; removing a Home Screen app or clearing site data can erase its stored progress. We cannot force-refresh an already pinned iPhone icon from JavaScript.
 
@@ -40,9 +42,9 @@ This is an installed offline-capable web app, not a native iOS package. It opens
 
 There is no seven-day signing limit on this route. However, iOS can evict web storage, and clearing website data or removing the app can erase the cache and saves. Reopen online if the cache is lost. This route is convenient for personal use, but it is not an absolute guarantee of permanent offline availability.
 
-## Verification Status for 1.6.1
+## Verification Status for 1.6.2
 
 - Core sand physics, connected-color clearing, persistence, and Sudoku uniqueness have automated unit tests.
-- Desktop Chromium and WebKit browser tests cover game startup, difficulty, pause, resume, phone-width layouts, and offline cache startup.
+- Desktop Chromium/WebKit and touch-enabled iPhone/Android browser projects cover game startup, difficulty, pause, resume, phone layouts, taps, pointer interruptions, update migration, retry, and offline cache startup.
 - Native iOS and Android projects receive the same local assets through `npm run mobile:sync`.
 - No claim of testing on a physical iPhone or Android phone is made. Native device tests and signing remain required.

@@ -163,7 +163,7 @@
       next.push(JSON.parse(JSON.stringify(session)));
       return this.persist(next);
     }
-    remove(id) { return this.persist(this.sessions.filter((saved) => saved.id !== id)); }
+    remove(id) { return !this.sessions.some((saved) => saved.id === id) || this.persist(this.sessions.filter((saved) => saved.id !== id)); }
     persist(next) {
       try { this.adapter.setItem(this.key, JSON.stringify(next)); this.sessions = next; this.error = null; return true; }
       catch (error) { this.error = error; return false; }
