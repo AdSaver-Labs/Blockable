@@ -1,7 +1,8 @@
 (() => {
   "use strict";
 
-  const VERSION = "1.5.0";
+  const VERSION = "1.6.1";
+  const { DIFFICULTIES, MODES, CONFIG, SandBoard, SessionStore } = window.BlockableCore;
   const BOARD_SIZE = 8;
   const COLORS = ["#2383e2", "#0f9d76", "#e89a3c", "#d45d79", "#8b78e6"];
   const SHAPES = [
@@ -65,6 +66,12 @@
       updateAvailable: "Налична е версия {version}.", updateFailed: "Проверката за актуализации не бе успешна.", storageFailed: "Промените не могат да бъдат запазени на това устройство.",
     },
   };
+  Object.assign(COPY.en, {
+    sand: "Sand Blocks", sandSub: "Turn falling blocks into flowing color.", veryHard: "Very Hard", continue: "Continue", unfinished: "Unfinished games", saveHome: "Save & home", delete: "Delete", deleteSave: "Delete this saved game?", mixedColors: "Mixed-color pieces", noSaved: "No unfinished games", checkUpdates: "Check for updates", difficulty: "Difficulty", pausedSaved: "Your game is saved.", resume: "Resume", moveLeft: "Move left", moveRight: "Move right", rotate: "Rotate", softDrop: "Soft drop", hardDrop: "Hard drop", saveFailed: "This game could not be saved. Free some device storage and try again.",
+  });
+  Object.assign(COPY.bg, {
+    sand: "Пясъчни блокове", sandSub: "Превърни падащите блокове в цветен пясък.", veryHard: "Много трудно", continue: "Продължи", unfinished: "Незавършени игри", saveHome: "Запази и начало", delete: "Изтрий", deleteSave: "Да се изтрие ли запазената игра?", mixedColors: "Многоцветни фигури", noSaved: "Няма незавършени игри", checkUpdates: "Провери за актуализации", difficulty: "Трудност", pausedSaved: "Играта е запазена.", resume: "Продължи", moveLeft: "Наляво", moveRight: "Надясно", rotate: "Завърти", softDrop: "Спусни", hardDrop: "Пусни долу", saveFailed: "Играта не може да бъде запазена. Освободи място и опитай пак.",
+  });
 
   const $ = (selector, root = document) => root.querySelector(selector);
   const create = (tag, className, text) => {
@@ -139,6 +146,10 @@
       this.root = root;
       this.game = null;
       this.audioContext = null;
+      this.currentSession = null;
+      this.userPaused = false;
+      this.backgrounded = document.hidden;
+      this.sessions = new SessionStore({ getItem: (key) => localStorage.getItem(key), setItem: (key, value) => localStorage.setItem(key, value) });
       this.boundVisibilityChange = () => this.setActive(!document.hidden);
     }
 
@@ -153,12 +164,16 @@
       document.addEventListener("visibilitychange", this.boundVisibilityChange);
       window.addEventListener("pagehide", () => this.setActive(false));
       window.addEventListener("pageshow", () => this.setActive(!document.hidden));
+      window.addEventListener("beforeunload", () => this.saveSession());
+      this.autosaveTimer = window.setInterval(() => this.saveSession(), 5000);
       this.registerServiceWorker();
     }
 
     setActive(active) {
+      this.backgrounded = !active;
       this.root.dataset.paused = String(!active);
       this.game?.setActive?.(active);
+      if (!active) this.saveSession();
       if (!this.audioContext) return;
       if (active && storage.value.sound) this.audioContext.resume().catch(() => {});
       if (!active) this.audioContext.suspend().catch(() => {});
@@ -167,6 +182,11 @@
     registerServiceWorker() {
       const native = window.Capacitor?.isNativePlatform?.() === true;
       if (!native && "serviceWorker" in navigator && /^https?:$/.test(location.protocol)) {
+        const wasControlled = Boolean(navigator.serviceWorker.controller);
+        let refreshed = false;
+        navigator.serviceWorker.addEventListener("controllerchange", () => {
+          if (wasControlled && !refreshed) { refreshed = true; this.saveSession(); location.reload(); }
+        });
         navigator.serviceWorker.register("./service-worker.js").catch(() => {});
       }
     }
@@ -178,12 +198,11 @@
       this.root.dataset.gameStyle = storage.value.gameStyle;
       this.root.style.setProperty("--custom-wallpaper", storage.value.customWallpaper ? `url(${JSON.stringify(storage.value.customWallpaper)})` : "none");
       document.documentElement.lang = storage.value.language;
-      const threeDimensional = storage.value.gameStyle === "glossy";
-      const iconPath = threeDimensional ? "./Assets/BlockableIcon.svg.png" : "./Assets/BlockableMinimalIcon.png";
+      const iconPath = "./Assets/BlockableDesktopIcon.png";
       const touchIcon = document.querySelector('link[rel="apple-touch-icon"]');
       const manifest = document.querySelector('link[rel="manifest"]');
-      if (touchIcon) touchIcon.href = iconPath;
-      if (manifest) manifest.href = threeDimensional ? "./manifest-3d.webmanifest" : "./manifest.webmanifest";
+      if (touchIcon) touchIcon.href = "./Assets/pwa/apple-touch-icon.png";
+      if (manifest) manifest.href = "./manifest.webmanifest";
       const themeColor = document.querySelector('meta[name="theme-color"]');
       if (themeColor) themeColor.content = storage.value.theme === "dark" ? "#191919" : "#f7f7f5";
       this.root.querySelectorAll(".brand-logo").forEach((logo) => { logo.src = iconPath; });
@@ -196,9 +215,107 @@
     }
 
     clear() {
+      this.saveSession();
       this.game?.destroy();
       this.game = null;
+      this.currentSession = null;
+      this.userPaused = false;
       this.root.replaceChildren();
+      window.scrollTo(0, 0);
+    }
+
+    isGameBlocked() { return this.userPaused || this.backgrounded || Boolean(this.root.querySelector(".modal")); }
+
+    saveSession() {
+      if (!this.game || !this.currentSession || !this.game.serialize) return true;
+      if (this.game.over || this.game.done || this.game.complete) return this.sessions.remove(this.currentSession.id);
+      const state = this.game.serialize();
+      return this.sessions.save({ ...this.currentSession, updatedAt: Date.now(), state });
+    }
+
+    pauseGame() {
+      if (!this.game || this.game.over || this.game.done || this.game.complete) return;
+      this.userPaused = true;
+      this.game.cleanupDrag?.();
+      this.game.setActive?.(false);
+      const saved = this.saveSession();
+      const modal = create("div", "modal");
+      const sheet = create("section", "sheet");
+      sheet.setAttribute("role", "dialog");
+      sheet.setAttribute("aria-modal", "true");
+      sheet.setAttribute("aria-label", this.t("paused"));
+      sheet.append(create("h2", null, this.t("paused")), create("p", null, this.t(saved ? "pausedSaved" : "saveFailed")));
+      const resume = create("button", "primary", this.t("continue"));
+      resume.addEventListener("click", () => { modal.remove(); this.userPaused = false; this.game?.setActive?.(!document.hidden); });
+      const home = create("button", "secondary", this.t("saveHome"));
+      home.addEventListener("click", () => this.showHome());
+      const actions = create("div", "sheet-footer");
+      actions.append(home, resume); sheet.append(actions); modal.append(sheet); this.root.append(modal);
+    }
+
+    openGame(mode) {
+      this.clear();
+      const screen = create("main", "screen game-picker");
+      screen.append(this.header(this.t(mode)), create("h2", null, this.t("choose")));
+      const levels = create("div", "level-grid difficulty-grid");
+      let mixedColors = false;
+      DIFFICULTIES.forEach((difficulty) => {
+        const button = create("button", "mode-button", this.t(difficulty));
+        button.type = "button";
+        button.dataset.difficulty = difficulty;
+        button.addEventListener("click", () => this.launchGame(mode, difficulty, null, { mixedColors: ["hard", "veryHard"].includes(difficulty) && mixedColors }));
+        levels.append(button);
+      });
+      screen.append(levels);
+      if (mode === "sand") {
+        const row = create("label", "mixed-setting", this.t("mixedColors"));
+        const toggle = create("input", "switch");
+        toggle.type = "checkbox";
+        toggle.setAttribute("aria-label", this.t("mixedColors"));
+        toggle.addEventListener("change", () => { mixedColors = toggle.checked; });
+        row.append(toggle, create("span", "hint", `${this.t("hard")} / ${this.t("veryHard")}`)); screen.append(row);
+      }
+      const saves = this.sessions.list(mode);
+      if (saves.length) {
+        screen.append(create("h2", "saved-heading", this.t("unfinished")));
+        const list = create("div", "saved-list");
+        saves.forEach((session) => {
+          const row = create("div", "saved-row");
+          const resume = create("button", "saved-resume");
+          resume.type = "button";
+          const date = new Date(session.updatedAt).toLocaleString(storage.value.language, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
+          resume.append(create("strong", null, this.t("continue")), create("span", "difficulty-tag", this.t(session.difficulty)), create("small", null, date));
+          resume.addEventListener("click", () => this.launchGame(mode, session.difficulty, session));
+          const remove = this.iconButton(this.t("delete"), "×", () => this.confirmDelete(session));
+          row.append(resume, remove); list.append(row);
+        });
+        screen.append(list);
+      }
+      this.root.append(screen);
+    }
+
+    confirmDelete(session) {
+      const modal = create("div", "modal");
+      const sheet = create("section", "sheet");
+      sheet.append(create("h2", null, this.t("deleteSave")));
+      const cancel = create("button", "secondary", this.t("cancel"));
+      const confirm = create("button", "primary danger-action", this.t("delete"));
+      cancel.addEventListener("click", () => modal.remove());
+      confirm.addEventListener("click", () => { if (this.sessions.remove(session.id)) this.openGame(session.mode); else { modal.remove(); this.toast(this.t("saveFailed")); } });
+      const actions = create("div", "sheet-footer"); actions.append(cancel, confirm); sheet.append(actions); modal.append(sheet); this.root.append(modal);
+    }
+
+    launchGame(mode, difficulty, saved = null, options = {}) {
+      this.clear();
+      this.currentSession = saved ? JSON.parse(JSON.stringify(saved)) : { id: crypto.randomUUID?.() || `${Date.now()}-${Math.random().toString(36).slice(2)}`, mode, difficulty, options, createdAt: Date.now() };
+      const state = this.currentSession.state || null;
+      const constructors = { block: BlockGame, tetris: TetrisGame, sand: SandGame, sudoku: SudokuGame, merge: MergeGame, mines: MinesGame };
+      this.game = new constructors[mode](this, difficulty, state, this.currentSession.options || {});
+      const toolbar = create("div", "session-toolbar");
+      toolbar.append(create("span", "difficulty-tag", this.t(difficulty)), this.iconButton(this.t("pause"), "⏸", () => this.pauseGame()));
+      const header = this.root.querySelector(".game-header");
+      header.after(toolbar);
+      if (!this.saveSession()) this.toast(this.t("saveFailed"));
     }
 
     sound(frequency = 320, duration = 0.06) {
@@ -241,7 +358,7 @@
       const brand = create("div", "brand");
       const mark = create("img", "brand-logo");
       mark.alt = "";
-      mark.src = storage.value.gameStyle === "glossy" ? "./Assets/BlockableIcon.svg.png" : "./Assets/BlockableMinimalIcon.png";
+      mark.src = "./Assets/BlockableDesktopIcon.png";
       brand.append(mark, document.createTextNode("Blockable"));
       top.append(brand, this.iconButton(this.t("settings"), "⚙", () => this.openSettings()));
 
@@ -254,15 +371,12 @@
 
       const grid = create("section", "game-grid");
       const games = [
-        ["block", "▦", () => this.startBlock()],
-        ["tetris", "▤", () => this.startTetris()],
-        ["sudoku", "#", () => this.openSudokuLevels()],
-        ["colorlink", "⌁", () => this.openColorLinkLevels()],
-        ["merge", "＋", () => this.startMerge()],
-        ["lights", "✦", () => this.startLights()],
-        ["mines", "⚑", () => this.startMines()],
-        ["memory", "◈", () => this.startMemory()],
-        ["daily", "✧", () => this.startDaily()],
+        ["block", "▦", () => this.openGame("block")],
+        ["tetris", "▤", () => this.openGame("tetris")],
+        ["sand", "⏳", () => this.openGame("sand")],
+        ["sudoku", "#", () => this.openGame("sudoku")],
+        ["merge", "＋", () => this.openGame("merge")],
+        ["mines", "⚑", () => this.openGame("mines")],
       ];
       games.forEach(([name, icon, handler]) => {
         const button = create("button", "game-card");
@@ -277,7 +391,7 @@
       });
 
       const footer = create("footer", "home-footer");
-      const update = create("button", "choice", this.t("check"));
+      const update = create("button", "choice", this.t("checkUpdates"));
       update.addEventListener("click", () => this.checkForUpdates());
       const level = Math.floor(storage.value.xp / 100) + 1;
       footer.append(create("span", null, `v${VERSION} · ${this.t("levelName")} ${level} · ${storage.value.xp} ${this.t("xp")}`), update);
@@ -296,6 +410,10 @@
         const response = await fetch("./version.json", { cache: "no-store" });
         if (!response.ok) throw new Error(`HTTP ${response.status}`);
         const release = await response.json();
+        if (release.version !== VERSION && "serviceWorker" in navigator) {
+          const registration = await navigator.serviceWorker.getRegistration();
+          await registration?.update();
+        }
         const message = release.version === VERSION
           ? this.t("current")
           : this.t("updateAvailable").replace("{version}", release.version);
@@ -306,6 +424,8 @@
     }
 
     openSettings() {
+      this.saveSession();
+      this.game?.cleanupDrag?.();
       const modal = create("div", "modal");
       const sheet = create("section", "sheet");
       sheet.setAttribute("role", "dialog");
@@ -387,7 +507,7 @@
         addSetting(label, toggle);
       });
 
-      const check = create("button", "secondary", this.t("check"));
+      const check = create("button", "secondary", this.t("checkUpdates"));
       check.addEventListener("click", () => this.checkForUpdates());
       addSetting(this.t("updates"), check, `v${VERSION}`);
 
@@ -446,42 +566,6 @@
       actions.append(cancel, confirm); sheet.append(actions); modal.append(sheet); this.root.append(modal);
     }
 
-    openColorLinkLevels() {
-      this.clear();
-      const screen = create("main", "screen level-map-screen");
-      screen.append(this.header(this.t("colorlink")));
-      screen.append(create("h1", "map-title", this.t("colorlink")), create("p", "map-subtitle", this.t("colorlinkSub")));
-      const map = create("div", "level-map");
-      for (let level = 1; level <= 12; level += 1) {
-        const locked = level > storage.value.colorlinkLevel;
-        const button = create("button", `level-node${locked ? " locked" : ""}${level === storage.value.colorlinkLevel ? " current" : ""}`);
-        button.type = "button"; button.disabled = locked; button.append(create("strong", null, locked ? "•" : String(level)), create("span", null, locked ? this.t("locked") : `${level} · ${level < 4 ? this.t("easy") : level < 8 ? this.t("medium") : this.t("hard")}`));
-        if (!locked) button.addEventListener("click", () => { this.clear(); this.game = new ColorLinkGame(this, false, level); });
-        map.append(button);
-      }
-      screen.append(map); this.root.append(screen);
-    }
-
-    openSudokuLevels() {
-      const modal = create("div", "modal");
-      const sheet = create("section", "sheet");
-      sheet.append(create("h2", null, this.t("sudoku")), create("p", null, this.t("choose")));
-      const levels = create("div", "level-grid");
-      ["easy", "medium", "hard", "extreme"].forEach((level) => {
-        const button = create("button", "mode-button", this.t(level));
-        button.addEventListener("click", () => {
-          modal.remove();
-          this.startSudoku(level);
-        });
-        levels.append(button);
-      });
-      sheet.append(levels);
-      modal.append(sheet);
-      modal.addEventListener("click", (event) => {
-        if (event.target === modal) modal.remove();
-      });
-      this.root.append(modal);
-    }
 
     award(mode, amount, daily = false) {
       storage.value.xp += amount;
@@ -497,20 +581,12 @@
       storage.save();
     }
 
-    startBlock() { this.clear(); this.game = new BlockGame(this); }
-    startTetris() { this.clear(); this.game = new TetrisGame(this); }
-    startSudoku(level) { this.clear(); this.game = new SudokuGame(this, level); }
-    startColorLink(daily = false, level = storage.value.colorlinkLevel) { this.clear(); this.game = new ColorLinkGame(this, daily, level); }
-    startDaily() { this.clear(); this.game = new DailyLogicGame(this); }
-    startMerge() { this.clear(); this.game = new MergeGame(this); }
-    startLights() { this.clear(); this.game = new LightsGame(this); }
-    startMines() { this.clear(); this.game = new MinesGame(this); }
-    startMemory() { this.clear(); this.game = new MemoryGame(this); }
   }
 
   class BlockGame {
-    constructor(app) {
+    constructor(app, difficulty = "medium", state = null) {
       this.app = app;
+      this.difficulty = difficulty;
       this.grid = Array.from({ length: BOARD_SIZE }, () => Array(BOARD_SIZE).fill(null));
       this.cells = [];
       this.pieces = [];
@@ -519,7 +595,11 @@
       this.locked = false;
       this.drag = null;
       this.renderShell();
-      this.newGame();
+      if (state) {
+        this.grid = state.grid; this.pieces = state.pieces; this.score = state.score;
+        if (this.pieces.every((piece) => piece.used)) this.pieces = this.makePieces();
+        this.draw();
+      } else this.newGame();
     }
 
     renderShell() {
@@ -553,7 +633,7 @@
       this.notice = create("div", "notice");
       const actions = create("div", "game-actions");
       const restart = create("button", "secondary", this.app.t("newGame"));
-      restart.addEventListener("click", () => this.newGame());
+      restart.addEventListener("click", () => this.app.launchGame("block", this.difficulty));
       actions.append(restart);
       screen.append(stats, this.board, this.tray, this.notice, actions);
       this.app.root.append(screen);
@@ -570,14 +650,18 @@
       this.score = 0;
       this.selected = null;
       this.locked = false;
+      this.over = false;
       this.notice.textContent = "";
       this.pieces = this.makePieces();
       this.draw();
     }
 
     makePieces() {
+      const config = CONFIG[this.difficulty];
+      const shapes = [...SHAPES, [[1, 1, 1], [1, 1, 1], [1, 1, 1]], [[1, 0, 0], [1, 0, 0], [1, 1, 1]]];
+      const allowed = shapes.filter((shape) => { const blocks = shape.flat().filter(Boolean).length; return blocks >= config.blockMin && blocks <= config.blockMax; });
       return Array.from({ length: 3 }, () => ({
-        shape: randomItem(SHAPES),
+        shape: randomItem(allowed),
         color: randomItem(COLORS),
         used: false,
       }));
@@ -647,6 +731,7 @@
     }
 
     select(index) {
+      if (this.app.isGameBlocked() || this.over) return;
       if (this.drag?.moved) return;
       const piece = this.pieces[index];
       if (!piece || piece.used || this.locked) return;
@@ -655,6 +740,7 @@
     }
 
     beginDrag(event, index) {
+      if (this.app.isGameBlocked() || this.over) return;
       if (event.button !== undefined && event.button !== 0) return;
       const piece = this.pieces[index];
       if (!piece || piece.used || this.locked) return;
@@ -751,6 +837,7 @@
     }
 
     place(index, row, column) {
+      if (this.app.isGameBlocked() || this.over) return;
       const piece = this.pieces[index];
       if (this.locked || !piece || piece.used || !this.canPlace(piece.shape, row, column)) return;
       this.locked = true;
@@ -780,12 +867,12 @@
       const clearingCells = this.cellsForLines(lines);
       clearingCells.forEach((cell) => cell.classList.add("clearing"));
       this.app.sound(520, 0.1);
-      window.setTimeout(() => {
-        lines.forEach(({ type, index: lineIndex }) => {
-          for (let offset = 0; offset < BOARD_SIZE; offset += 1) {
-            this.grid[type === "row" ? lineIndex : offset][type === "row" ? offset : lineIndex] = null;
-          }
-        });
+      lines.forEach(({ type, index: lineIndex }) => {
+        for (let offset = 0; offset < BOARD_SIZE; offset += 1) {
+          this.grid[type === "row" ? lineIndex : offset][type === "row" ? offset : lineIndex] = null;
+        }
+      });
+      this.clearTimer = window.setTimeout(() => {
         this.finishMove();
       }, 220);
     }
@@ -814,9 +901,11 @@
       this.draw();
       this.locked = false;
       if (!this.pieces.some((piece) => this.hasMove(piece))) {
+        this.over = true;
         this.notice.textContent = this.app.t("noMoves");
-        window.setTimeout(() => this.showGameOver(), 300);
+        this.overTimer = window.setTimeout(() => this.showGameOver(), 300);
       }
+      this.app.saveSession();
     }
 
     showGameOver() {
@@ -830,7 +919,11 @@
       this.app.root.append(modal);
     }
 
+    serialize() { return { grid: this.grid, pieces: this.pieces, score: this.score }; }
+
     destroy() {
+      window.clearTimeout(this.clearTimer);
+      window.clearTimeout(this.overTimer);
       this.cleanupDrag();
     }
   }
@@ -877,177 +970,161 @@
     destroy() {}
   }
 
-  class ColorLinkGame extends ArcadeGridGame {
-    constructor(app, daily = false, level = 1) {
-      const size = Math.min(10, 5 + Math.floor((level + 1) / 2));
-      super(app, app.t("colorlink"), size, "colorlink-screen");
-      this.daily = daily; this.level = level; this.size = size;
-      this.pairCount = Math.min(size - 1, 3 + Math.floor((level - 1) / 2));
-      this.colors = Array.from({ length: this.pairCount }, (_, index) => COLORS[index % COLORS.length]);
-      this.completed = new Set(); this.active = null; this.path = []; this.moves = 0; this.dragging = false;
-      this.scoreNode = this.stat(`${this.app.t("level")} ${level}`, create("strong", null, "0"));
-      this.boundPointerMove = (event) => {
-        if (!this.dragging) return;
-        const cell = document.elementFromPoint(event.clientX, event.clientY)?.closest(".color-cell");
-        if (cell && this.board.contains(cell)) this.extend(Number(cell.dataset.row), Number(cell.dataset.column));
-      };
-      this.boundPointerEnd = () => { this.dragging = false; };
-      this.board.addEventListener("pointermove", this.boundPointerMove);
-      window.addEventListener("pointerup", this.boundPointerEnd);
-      window.addEventListener("pointercancel", this.boundPointerEnd);
-      this.reset();
-      this.button(this.app.t("reset"), () => this.reset());
-    }
-
-    reset() {
-      this.grid = Array.from({ length: this.size }, () => Array(this.size).fill(null));
-      this.obstacles = new Set(); this.completed.clear(); this.active = null; this.path = []; this.moves = 0; this.done = false;
-      this.colors.forEach((color, row) => { this.grid[row][0] = color; this.grid[row][this.size - 1] = color; });
-      for (let index = 0; index < Math.max(0, this.level - 2); index += 1) {
-        const row = (index * 2 + 1) % this.pairCount;
-        const column = 2 + ((index * 3) % Math.max(1, this.size - 4));
-        if (!this.grid[row][column]) this.obstacles.add(`${row},${column}`);
-      }
-      this.notice.textContent = ""; this.render();
-    }
-
-    render() {
-      this.board.replaceChildren();
-      for (let row = 0; row < this.size; row += 1) for (let column = 0; column < this.size; column += 1) {
-        const cell = create("button", `arcade-cell color-cell${this.obstacles.has(`${row},${column}`) ? " obstacle" : ""}`);
-        cell.dataset.row = String(row);
-        cell.dataset.column = String(column);
-        const color = this.grid[row][column];
-        cell.style.setProperty("--cell-color", color || "transparent");
-        cell.classList.toggle("endpoint", Boolean(color && (column === 0 || column === this.size - 1)));
-        cell.classList.toggle("path-cell", Boolean(color && column !== 0 && column !== this.size - 1));
-        if (!this.obstacles.has(`${row},${column}`)) {
-          cell.addEventListener("pointerdown", (event) => { event.preventDefault(); this.start(row, column); });
-          cell.addEventListener("click", () => this.extend(row, column));
-        }
-        this.board.append(cell);
-      }
-      this.scoreNode.textContent = String(this.moves);
-    }
-
-    start(row, column) {
-      const color = this.grid[row][column];
-      if (!color || this.completed.has(color)) return;
-      this.dragging = true; this.active = color; this.path = [[row, column]]; this.notice.textContent = ""; this.render();
-    }
-
-    extend(row, column) {
-      if (!this.active || this.done || this.obstacles.has(`${row},${column}`)) return;
-      const last = this.path[this.path.length - 1];
-      if (Math.abs(last[0] - row) + Math.abs(last[1] - column) !== 1) return;
-      const cellColor = this.grid[row][column];
-      if (cellColor && cellColor !== this.active) return;
-      if (this.path.some(([r, c]) => r === row && c === column)) return;
-      this.path.push([row, column]);
-      if (column === this.size - 1 && cellColor === this.active) {
-        this.path.forEach(([r, c]) => { this.grid[r][c] = this.active; });
-        this.completed.add(this.active); this.moves += 1; this.active = null; this.path = [];
-        this.render();
-        if (this.completed.size === this.colors.length) {
-          storage.value.colorlinkLevel = Math.max(storage.value.colorlinkLevel, this.level + 1);
-          storage.save(); this.finish("colorlink", 50 + this.level * 5, this.daily);
-        }
-      } else { this.grid[row][column] = this.active; this.render(); }
-    }
-
-    destroy() {
-      this.board.removeEventListener("pointermove", this.boundPointerMove);
-      window.removeEventListener("pointerup", this.boundPointerEnd);
-      window.removeEventListener("pointercancel", this.boundPointerEnd);
-    }
-  }
 
   class MergeGame extends ArcadeGridGame {
-    constructor(app) {
-      super(app, app.t("merge"), 4, "merge-screen");
-      this.grid = Array.from({ length: 4 }, () => Array(4).fill(0));
-      this.score = 0; this.scoreNode = this.stat(app.t("score"), create("strong", null, "0"));
-      [0, 1].forEach(() => this.addRandom()); this.render();
-      [["←", "left"], ["↑", "up"], ["↓", "down"], ["→", "right"]].forEach(([label, direction]) => this.button(label, () => this.move(direction), "arcade-control"));
-      this.boundKeyDown = (event) => { const map = { ArrowLeft: "left", ArrowRight: "right", ArrowUp: "up", ArrowDown: "down" }; if (map[event.key]) { event.preventDefault(); this.move(map[event.key]); } };
-      this.swipeStart = null;
-      this.boundPointerDown = (event) => { this.swipeStart = [event.clientX, event.clientY]; };
-      this.boundPointerUp = (event) => {
+    constructor(app, difficulty = "medium", state = null) {
+      super(app, app.t("merge"), CONFIG[difficulty].mergeSize, "merge-screen");
+      this.difficulty = difficulty;
+      this.grid = state?.grid || Array.from({ length: this.size }, () => Array(this.size).fill(0));
+      this.score = state?.score || 0;
+      this.scoreNode = this.stat(app.t("score"), create("strong", null, String(this.score)));
+      if (!state) { this.addRandom(); this.addRandom(); }
+      this.render();
+      [["←", "left"], ["↑", "up"], ["↓", "down"], ["→", "right"]].forEach(([label, direction]) => {
+        const button = this.button(label, () => this.move(direction), "arcade-control");
+        button.setAttribute("aria-label", direction);
+      });
+      this.button(app.t("newGame"), () => app.launchGame("merge", difficulty));
+      this.boundKeyDown = (event) => {
+        const map = { ArrowLeft: "left", ArrowRight: "right", ArrowUp: "up", ArrowDown: "down" };
+        if (map[event.key] && !app.isGameBlocked()) { event.preventDefault(); this.move(map[event.key]); }
+      };
+      this.board.addEventListener("pointerdown", (event) => {
+        if (app.isGameBlocked()) return;
+        this.swipeStart = [event.clientX, event.clientY];
+        this.board.setPointerCapture(event.pointerId);
+      });
+      this.board.addEventListener("pointerup", (event) => {
         if (!this.swipeStart) return;
         const [startX, startY] = this.swipeStart;
         this.swipeStart = null;
-        const deltaX = event.clientX - startX;
-        const deltaY = event.clientY - startY;
-        if (Math.max(Math.abs(deltaX), Math.abs(deltaY)) < 24) return;
-        this.move(Math.abs(deltaX) > Math.abs(deltaY) ? (deltaX > 0 ? "right" : "left") : (deltaY > 0 ? "down" : "up"));
-      };
+        const dx = event.clientX - startX; const dy = event.clientY - startY;
+        if (Math.max(Math.abs(dx), Math.abs(dy)) < 24) return;
+        this.move(Math.abs(dx) > Math.abs(dy) ? (dx > 0 ? "right" : "left") : (dy > 0 ? "down" : "up"));
+      });
+      this.board.addEventListener("pointercancel", () => { this.swipeStart = null; });
       window.addEventListener("keydown", this.boundKeyDown);
-      this.board.addEventListener("pointerdown", this.boundPointerDown);
-      this.board.addEventListener("pointerup", this.boundPointerUp);
     }
-
-    addRandom() { const empty = []; this.grid.forEach((row, r) => row.forEach((value, c) => { if (!value) empty.push([r, c]); })); if (empty.length) { const [r, c] = randomItem(empty); this.grid[r][c] = Math.random() < 0.9 ? 2 : 4; } }
-    render() { this.board.replaceChildren(); this.grid.flat().forEach((value) => { const cell = create("div", `arcade-cell merge-cell value-${value || 0}`, value ? String(value) : ""); cell.style.setProperty("--tile-level", String(Math.log2(value || 1))); this.board.append(cell); }); this.scoreNode.textContent = String(this.score); }
+    addRandom() {
+      const empty = [];
+      this.grid.forEach((row, r) => row.forEach((value, c) => { if (!value) empty.push([r, c]); }));
+      if (empty.length) { const [r, c] = randomItem(empty); this.grid[r][c] = Math.random() < CONFIG[this.difficulty].fourChance ? 4 : 2; }
+    }
+    render() {
+      const fragment = document.createDocumentFragment();
+      this.grid.flat().forEach((value) => {
+        const cell = create("div", `arcade-cell merge-cell value-${value || 0}`, value ? String(value) : "");
+        cell.style.setProperty("--tile-level", String(Math.log2(value || 1)));
+        fragment.append(cell);
+      });
+      this.board.replaceChildren(fragment);
+      this.scoreNode.textContent = String(this.score);
+    }
     move(direction) {
-      if (this.done) return;
-      const before = JSON.stringify(this.grid); const transpose = direction === "up" || direction === "down";
-      let lines = transpose ? this.grid[0].map((_, c) => this.grid.map((row) => row[c])) : this.grid.map((row) => [...row]);
-      if (direction === "right" || direction === "down") lines = lines.map((line) => line.reverse());
-      lines = lines.map((line) => { const packed = line.filter(Boolean); const merged = []; for (let i = 0; i < packed.length; i += 1) { if (packed[i] === packed[i + 1]) { merged.push(packed[i] * 2); this.score += packed[i] * 2; i += 1; } else merged.push(packed[i]); } while (merged.length < 4) merged.push(0); return (direction === "right" || direction === "down") ? merged.reverse() : merged; });
-      this.grid = transpose ? this.grid.map((_, r) => lines.map((line) => line[r])) : lines;
+      if (this.done || this.app.isGameBlocked()) return;
+      const before = JSON.stringify(this.grid); const vertical = direction === "up" || direction === "down";
+      const reverse = direction === "right" || direction === "down";
+      let lines = vertical ? this.grid[0].map((_, c) => this.grid.map((row) => row[c])) : this.grid.map((row) => [...row]);
+      if (reverse) lines = lines.map((line) => line.reverse());
+      lines = lines.map((line) => {
+        const packed = line.filter(Boolean); const merged = [];
+        for (let i = 0; i < packed.length; i += 1) {
+          if (packed[i] === packed[i + 1]) { merged.push(packed[i] * 2); this.score += packed[i] * 2; i += 1; }
+          else merged.push(packed[i]);
+        }
+        while (merged.length < this.size) merged.push(0);
+        return reverse ? merged.reverse() : merged;
+      });
+      this.grid = vertical ? this.grid.map((_, r) => lines.map((line) => line[r])) : lines;
       if (JSON.stringify(this.grid) === before) return;
       this.addRandom(); this.render(); this.app.sound(280);
       if (this.grid.flat().some((value) => value >= 2048)) this.finish("merge", Math.max(20, this.score));
+      else if (!this.grid.some((row, r) => row.some((value, c) => !value || value === this.grid[r + 1]?.[c] || value === row[c + 1]))) {
+        this.done = true; this.notice.textContent = this.app.t("gameOver");
+      }
+      this.app.saveSession();
     }
-    destroy() { window.removeEventListener("keydown", this.boundKeyDown); this.board.removeEventListener("pointerdown", this.boundPointerDown); this.board.removeEventListener("pointerup", this.boundPointerUp); }
-  }
-
-  class LightsGame extends ArcadeGridGame {
-    constructor(app) { super(app, app.t("lights"), 5, "lights-screen"); this.grid = Array.from({ length: 5 }, () => Array.from({ length: 5 }, () => Math.random() > 0.58)); this.moves = 0; this.movesNode = this.stat(app.t("moves"), create("strong", null, "0")); this.render(); this.button(app.t("reset"), () => this.reset()); }
-    reset() { this.grid = Array.from({ length: 5 }, () => Array.from({ length: 5 }, () => Math.random() > 0.58)); this.moves = 0; this.done = false; this.notice.textContent = ""; this.render(); }
-    render() { this.board.replaceChildren(); this.grid.forEach((row, r) => row.forEach((on, c) => { const cell = create("button", `arcade-cell light-cell${on ? " on" : ""}`); cell.addEventListener("click", () => this.toggle(r, c)); this.board.append(cell); })); this.movesNode.textContent = String(this.moves); }
-    toggle(row, column) { [[0, 0], [1, 0], [-1, 0], [0, 1], [0, -1]].forEach(([dr, dc]) => { const r = row + dr; const c = column + dc; if (this.grid[r]?.[c] !== undefined) this.grid[r][c] = !this.grid[r][c]; }); this.moves += 1; this.render(); if (this.grid.flat().every((on) => !on)) this.finish("lights", Math.max(20, 100 - this.moves)); }
+    serialize() { return { grid: this.grid, score: this.score }; }
+    destroy() { window.removeEventListener("keydown", this.boundKeyDown); }
   }
 
   class MinesGame extends ArcadeGridGame {
-    constructor(app) { super(app, app.t("mines"), 8, "mines-screen"); this.mineCount = 10; this.action = "reveal"; this.reset(); this.button(app.t("reset"), () => this.reset()); this.modeButton = this.button(app.t("flag"), () => this.toggleAction()); }
-    reset() { this.mines = new Set(); while (this.mines.size < this.mineCount) this.mines.add(Math.floor(Math.random() * 64)); this.revealed = new Set(); this.flags = new Set(); this.done = false; this.notice.textContent = ""; this.render(); }
-    toggleAction() { this.action = this.action === "reveal" ? "flag" : "reveal"; this.modeButton.textContent = this.app.t(this.action === "reveal" ? "flag" : "reveal"); this.modeButton.classList.toggle("active", this.action === "flag"); }
-    toggleFlag(index) { if (this.done || this.revealed.has(index)) return; this.flags.has(index) ? this.flags.delete(index) : this.flags.add(index); this.render(); }
-    neighbors(index) { const r = Math.floor(index / 8); const c = index % 8; const out = []; for (let dr = -1; dr <= 1; dr += 1) for (let dc = -1; dc <= 1; dc += 1) if (dr || dc) { const rr = r + dr; const cc = c + dc; if (rr >= 0 && rr < 8 && cc >= 0 && cc < 8) out.push(rr * 8 + cc); } return out; }
-    count(index) { return this.neighbors(index).filter((neighbor) => this.mines.has(neighbor)).length; }
-    render() { this.board.replaceChildren(); for (let index = 0; index < 64; index += 1) { const cell = create("button", `arcade-cell mine-cell${this.revealed.has(index) ? " revealed" : ""}${this.flags.has(index) ? " flagged" : ""}`, this.flags.has(index) ? "⚑" : this.revealed.has(index) && this.mines.has(index) ? "💣" : this.revealed.has(index) ? String(this.count(index) || "") : ""); cell.addEventListener("click", () => this.action === "flag" ? this.toggleFlag(index) : this.reveal(index)); cell.addEventListener("contextmenu", (event) => { event.preventDefault(); this.toggleFlag(index); }); this.board.append(cell); } }
-    reveal(index) { if (this.done || this.flags.has(index) || this.revealed.has(index)) return; if (this.mines.has(index)) { this.revealed = new Set(this.mines); this.render(); this.notice.textContent = this.app.t("gameOver"); this.done = true; return; } const queue = [index]; while (queue.length) { const current = queue.shift(); if (this.revealed.has(current)) continue; this.revealed.add(current); if (!this.count(current)) this.neighbors(current).filter((neighbor) => !this.mines.has(neighbor)).forEach((neighbor) => queue.push(neighbor)); } this.render(); if (this.revealed.size >= 64 - this.mineCount) this.finish("mines", 60); }
-  }
-
-  class MemoryGame extends ArcadeGridGame {
-    constructor(app) { super(app, app.t("memory"), 4, "memory-screen"); this.screen.insertBefore(create("p", "game-instructions", this.app.t("memoryRules")), this.stats); this.reset(); this.button(app.t("reset"), () => this.reset()); }
-    reset() { this.values = shuffle([...COLORS, "#f0c64b", "#4ca6e8", ...COLORS, "#f0c64b", "#4ca6e8"]); this.open = []; this.matched = new Set(); this.moves = 0; this.locked = false; this.done = false; this.movesNode ||= this.stat(this.app.t("moves"), create("strong", null, "0")); this.render(); }
-    render() { this.board.replaceChildren(); this.values.forEach((color, index) => { const shown = this.open.includes(index) || this.matched.has(index); const cell = create("button", `arcade-cell memory-cell${shown ? " shown" : ""}`, shown ? "" : "?"); if (shown) cell.style.setProperty("--cell-color", color); cell.addEventListener("click", () => this.pick(index)); this.board.append(cell); }); this.movesNode.textContent = String(this.moves); }
-    pick(index) { if (this.locked || this.matched.has(index) || this.open.includes(index)) return; this.open.push(index); this.render(); if (this.open.length < 2) return; this.moves += 1; const [first, second] = this.open; if (this.values[first] === this.values[second]) { this.matched.add(first); this.matched.add(second); this.open = []; this.render(); if (this.matched.size === this.values.length) this.finish("memory", Math.max(20, 100 - this.moves)); } else { this.locked = true; window.setTimeout(() => { this.open = []; this.locked = false; this.render(); }, 650); } }
-  }
-
-  class DailyLogicGame extends ArcadeGridGame {
-    constructor(app) {
-      super(app, app.t("daily"), 6, "daily-screen");
-      this.screen.insertBefore(create("p", "game-instructions", this.app.t("dailyRules")), this.stats);
-      this.solution = Array.from({ length: 36 }, (_, index) => { const row = Math.floor(index / 6); const column = index % 6; return (row + column + (row % 2)) % 2 ? 1 : 2; });
-      this.boardState = Array(36).fill(0); this.given = new Set(); this.mistakes = 0; this.seed = localDateKey().split("-").join("");
-      for (let index = 0; index < 36; index += 1) if ((Number(this.seed) + index * 17) % 5 < 2) { this.boardState[index] = this.solution[index]; this.given.add(index); }
-      this.mistakeNode = this.stat(this.app.t("mistakes"), create("strong", null, "0")); this.render();
-      this.button(this.app.t("check"), () => this.check(), "primary"); this.button(this.app.t("reset"), () => this.reset());
+    constructor(app, difficulty = "medium", state = null) {
+      super(app, app.t("mines"), CONFIG[difficulty].mineSize, "mines-screen");
+      this.difficulty = difficulty; this.mineCount = CONFIG[difficulty].mines;
+      this.action = state?.action || "reveal";
+      this.mines = new Set(state?.mines || []);
+      if (!state) while (this.mines.size < this.mineCount) this.mines.add(Math.floor(Math.random() * this.size ** 2));
+      this.revealed = new Set(state?.revealed || []); this.flags = new Set(state?.flags || []);
+      this.started = state?.started || false; this.elapsed = state?.elapsed || 0;
+      this.timeNode = this.stat(app.t("currentTime"), create("strong", null, String(this.elapsed)));
+      this.flagNode = this.stat(app.t("flag"), create("strong", null, "0"));
+      this.render();
+      this.button(app.t("newGame"), () => app.launchGame("mines", difficulty));
+      this.modeButton = this.button(app.t(this.action === "reveal" ? "flag" : "reveal"), () => this.toggleAction());
+      this.modeButton.classList.toggle("active", this.action === "flag");
+      this.timer = window.setInterval(() => { if (this.started && !this.done && !app.isGameBlocked()) { this.elapsed += 1; this.timeNode.textContent = String(this.elapsed); } }, 1000);
     }
-    reset() { this.boardState = Array.from({ length: 36 }, (_, index) => this.given.has(index) ? this.solution[index] : 0); this.mistakes = 0; this.done = false; this.notice.textContent = ""; this.render(); }
-    render() { this.board.replaceChildren(); this.boardState.forEach((value, index) => { const cell = create("button", `arcade-cell daily-cell${this.given.has(index) ? " given" : ""}`, value === 1 ? "☀" : value === 2 ? "☾" : ""); cell.disabled = this.given.has(index); cell.addEventListener("click", () => { this.boardState[index] = this.boardState[index] === 0 ? 1 : this.boardState[index] === 1 ? 2 : 0; this.render(); }); this.board.append(cell); }); this.mistakeNode.textContent = String(this.mistakes); }
-    check() { if (this.done) return; if (this.boardState.some((value) => !value)) { this.notice.textContent = this.app.t("rules"); return; } const valid = this.boardState.every((value, index) => value === this.solution[index]); if (!valid) { this.mistakes += 1; this.notice.textContent = `${this.app.t("mistakes")}: ${this.mistakes}`; this.render(); return; } this.finish("daily", Math.max(25, 100 - this.mistakes * 10), true); }
+    toggleAction() { this.action = this.action === "reveal" ? "flag" : "reveal"; this.modeButton.textContent = this.app.t(this.action === "reveal" ? "flag" : "reveal"); this.modeButton.classList.toggle("active", this.action === "flag"); }
+    toggleFlag(index) { if (this.done || this.app.isGameBlocked() || this.revealed.has(index)) return; this.flags.has(index) ? this.flags.delete(index) : this.flags.add(index); this.render(); this.app.saveSession(); }
+    neighbors(index) {
+      const r = Math.floor(index / this.size); const c = index % this.size; const out = [];
+      for (let dr = -1; dr <= 1; dr += 1) for (let dc = -1; dc <= 1; dc += 1) if (dr || dc) {
+        const rr = r + dr; const cc = c + dc;
+        if (rr >= 0 && rr < this.size && cc >= 0 && cc < this.size) out.push(rr * this.size + cc);
+      }
+      return out;
+    }
+    count(index) { return this.neighbors(index).filter((neighbor) => this.mines.has(neighbor)).length; }
+    render() {
+      const fragment = document.createDocumentFragment();
+      for (let index = 0; index < this.size ** 2; index += 1) {
+        const revealed = this.revealed.has(index);
+        const cell = create("button", `arcade-cell mine-cell${revealed ? " revealed" : ""}${this.flags.has(index) ? " flagged" : ""}`, this.flags.has(index) ? "⚑" : revealed && this.mines.has(index) ? "💣" : revealed ? String(this.count(index) || "") : "");
+        cell.type = "button";
+        cell.setAttribute("aria-label", `${Math.floor(index / this.size) + 1}, ${index % this.size + 1}`);
+        cell.addEventListener("click", () => this.action === "flag" ? this.toggleFlag(index) : this.reveal(index));
+        cell.addEventListener("contextmenu", (event) => { event.preventDefault(); this.toggleFlag(index); });
+        fragment.append(cell);
+      }
+      this.board.replaceChildren(fragment);
+      this.flagNode.textContent = `${this.flags.size} / ${this.mineCount}`;
+    }
+    reveal(index) {
+      if (this.done || this.app.isGameBlocked() || this.flags.has(index) || this.revealed.has(index)) return;
+      if (!this.started) {
+        const safe = new Set([index, ...this.neighbors(index)]);
+        for (const mine of safe) this.mines.delete(mine);
+        while (this.mines.size < this.mineCount) { const candidate = Math.floor(Math.random() * this.size ** 2); if (!safe.has(candidate)) this.mines.add(candidate); }
+        this.started = true;
+      }
+      if (this.mines.has(index)) {
+        this.revealed = new Set([...this.revealed, ...this.mines]); this.done = true;
+        this.render(); this.notice.textContent = this.app.t("gameOver"); this.app.saveSession(); return;
+      }
+      const queue = [index];
+      for (let cursor = 0; cursor < queue.length; cursor += 1) {
+        const current = queue[cursor];
+        if (this.revealed.has(current) || this.flags.has(current)) continue;
+        this.revealed.add(current);
+        if (!this.count(current)) queue.push(...this.neighbors(current).filter((neighbor) => !this.mines.has(neighbor)));
+      }
+      this.render();
+      if (this.revealed.size >= this.size ** 2 - this.mineCount) this.finish("mines", 60);
+      this.app.saveSession();
+    }
+    serialize() { return { mines: [...this.mines], revealed: [...this.revealed], flags: [...this.flags], started: this.started, elapsed: this.elapsed, action: this.action }; }
+    destroy() { window.clearInterval(this.timer); }
   }
+
 
   class TetrisGame {
-    constructor(app) {
+    constructor(app, difficulty = "medium", state = null) {
       this.app = app;
+      this.difficulty = difficulty;
       this.rows = 20;
       this.columns = 10;
-      this.dropInterval = 620;
+      this.dropInterval = CONFIG[difficulty].tetrisSpeed;
       this.lastTick = performance.now();
       this.elapsed = 0;
       this.animationFrame = null;
@@ -1055,6 +1132,11 @@
       this.paused = false;
       this.over = false;
       this.resetState();
+      if (state) {
+        this.grid = state.grid; this.score = state.score; this.lines = state.lines;
+        this.current = state.current; this.next = state.next; this.elapsed = state.elapsed || 0;
+        this.dropInterval = Math.max(100, CONFIG[difficulty].tetrisSpeed - Math.floor(this.lines / 10) * 55);
+      }
       this.renderShell();
       this.boundKeyDown = (event) => this.keyDown(event);
       window.addEventListener("keydown", this.boundKeyDown);
@@ -1107,8 +1189,8 @@
       const controls = create("div", "tetris-controls");
       const definitions = [
         ["←", "Move left", () => this.move(-1)], ["↻", "Rotate", () => this.rotate()], ["→", "Move right", () => this.move(1)],
-        ["↓", "Soft drop", () => this.softDrop()], ["⏸", this.app.t("pause"), () => this.togglePause()], ["⤓", "Hard drop", () => this.hardDrop()],
-        ["↺", this.app.t("newGame"), () => { this.dropInterval = 620; this.resetState(); this.lastTick = performance.now(); this.draw(); }],
+        ["↓", "Soft drop", () => this.softDrop()], ["⏸", this.app.t("pause"), () => this.app.pauseGame()], ["⤓", "Hard drop", () => this.hardDrop()],
+        ["↺", this.app.t("newGame"), () => this.app.launchGame("tetris", this.difficulty)],
       ];
       definitions.forEach(([symbol, label, handler]) => {
         const button = create("button", null, symbol);
@@ -1131,7 +1213,7 @@
     tick(now) {
       const delta = Math.min(Math.max(0, now - this.lastTick), 250);
       this.lastTick = now;
-      if (!this.paused && !this.over && !this.backgrounded) {
+      if (!this.paused && !this.over && !this.backgrounded && !this.app.isGameBlocked()) {
         this.elapsed += delta;
         if (this.elapsed >= this.dropInterval) {
           this.elapsed %= this.dropInterval;
@@ -1177,6 +1259,8 @@
     }
 
     drawNext() {
+      if (this.renderedNext === this.next) return;
+      this.renderedNext = this.next;
       this.nextNode.replaceChildren();
       const preview = create("div", "mini-tetromino");
       preview.style.gridTemplateColumns = `repeat(${this.next.shape[0].length}, 11px)`;
@@ -1186,13 +1270,13 @@
     }
 
     move(direction) {
-      if (this.paused || this.over) return;
+      if (this.paused || this.over || this.app.isGameBlocked()) return;
       if (this.valid(this.current, 0, direction)) this.current.column += direction;
       this.draw();
     }
 
     rotate() {
-      if (this.paused || this.over) return;
+      if (this.paused || this.over || this.app.isGameBlocked()) return;
       const rotated = this.current.shape[0].map((_, index) => this.current.shape.map((row) => row[index]).reverse());
       if (this.valid(this.current, 0, 0, rotated)) this.current.shape = rotated;
       else if (this.valid(this.current, 0, -1, rotated)) { this.current.column -= 1; this.current.shape = rotated; }
@@ -1207,14 +1291,14 @@
     }
 
     softDrop() {
-      if (this.paused || this.over) return;
+      if (this.paused || this.over || this.app.isGameBlocked()) return;
       this.score += 1;
       this.stepDown();
       this.elapsed = 0;
     }
 
     hardDrop() {
-      if (this.paused || this.over) return;
+      if (this.paused || this.over || this.app.isGameBlocked()) return;
       let distance = 0;
       while (this.valid(this.current, 1, 0)) { this.current.row += 1; distance += 1; }
       this.score += distance * 2;
@@ -1233,7 +1317,7 @@
       if (cleared) {
         this.lines += cleared;
         this.score += [0, 100, 300, 500, 800][cleared];
-        this.dropInterval = Math.max(160, 620 - Math.floor(this.lines / 10) * 55);
+        this.dropInterval = Math.max(100, CONFIG[this.difficulty].tetrisSpeed - Math.floor(this.lines / 10) * 55);
         this.app.sound(520, 0.1);
       } else {
         this.score += 10;
@@ -1243,19 +1327,17 @@
       if (!this.valid(this.current)) {
         this.over = true;
         this.stateNode.textContent = this.app.t("gameOver");
-        window.setTimeout(() => this.showGameOver(), 180);
+        this.overTimer = window.setTimeout(() => this.showGameOver(), 180);
       }
+      this.app.saveSession();
     }
 
     togglePause() {
-      if (this.over) return;
-      this.paused = !this.paused;
-      this.elapsed = 0;
-      this.lastTick = performance.now();
-      this.draw();
+      this.app.pauseGame();
     }
 
     keyDown(event) {
+      if (this.app.isGameBlocked()) return;
       const actions = {
         ArrowLeft: () => this.move(-1), ArrowRight: () => this.move(1), ArrowDown: () => this.softDrop(),
         ArrowUp: () => this.rotate(), " ": () => this.hardDrop(), p: () => this.togglePause(), P: () => this.togglePause(),
@@ -1271,11 +1353,7 @@
       sheet.append(create("h2", null, this.app.t("gameOver")), create("p", null, `${this.app.t("score")}: ${this.score}`));
       const again = create("button", "primary", this.app.t("again"));
       again.addEventListener("click", () => {
-        modal.remove();
-        this.dropInterval = 620;
-        this.resetState();
-        this.lastTick = performance.now();
-        this.draw();
+        this.app.launchGame("tetris", this.difficulty);
       });
       sheet.append(again);
       modal.append(sheet);
@@ -1287,37 +1365,242 @@
       this.lastTick = performance.now();
     }
 
+    serialize() { return { grid: this.grid, current: this.current, next: this.next, score: this.score, lines: this.lines, elapsed: this.elapsed }; }
+
     destroy() {
       window.cancelAnimationFrame(this.animationFrame);
+      window.clearTimeout(this.overTimer);
       window.removeEventListener("keydown", this.boundKeyDown);
     }
   }
 
+  class SandGame {
+    constructor(app, difficulty = "medium", state = null, options = {}) {
+      this.app = app;
+      this.difficulty = difficulty;
+      this.mixedColors = ["hard", "veryHard"].includes(difficulty) && Boolean(options.mixedColors);
+      this.blockSize = 8;
+      this.simulation = new SandBoard(80, 144, state?.cells);
+      this.score = state?.score || 0;
+      this.clears = state?.clears || 0;
+      this.current = state?.current || this.randomPiece();
+      this.next = state?.next || this.randomPiece();
+      this.backgrounded = document.hidden;
+      this.over = false;
+      this.lastFrame = performance.now();
+      this.accumulator = 0;
+      this.clearClock = 0;
+      this.flash = 0;
+      this.renderShell();
+      this.boundKeyDown = (event) => {
+        if (this.app.isGameBlocked()) return;
+        const actions = { ArrowLeft: () => this.move(-1), ArrowRight: () => this.move(1), ArrowUp: () => this.rotate(), ArrowDown: () => this.softDrop(), " ": () => this.hardDrop(), p: () => app.pauseGame(), P: () => app.pauseGame() };
+        if (actions[event.key]) { event.preventDefault(); actions[event.key](); }
+      };
+      window.addEventListener("keydown", this.boundKeyDown);
+      this.frame = requestAnimationFrame((time) => this.tick(time));
+    }
+
+    randomPiece() {
+      const shape = randomItem(TETROMINOES).map((row) => [...row]);
+      const color = 1 + Math.floor(Math.random() * CONFIG[this.difficulty].sandColors);
+      const colors = shape.map((row) => row.map((filled) => filled ? (this.mixedColors ? 1 + Math.floor(Math.random() * CONFIG[this.difficulty].sandColors) : color) : 0));
+      return { shape, colors, x: Math.floor((80 - shape[0].length * this.blockSize) / 2), y: 0 };
+    }
+
+    renderShell() {
+      const screen = create("main", "screen sand-screen");
+      screen.append(this.app.header(this.app.t("sand")));
+      const stats = create("div", "score-strip");
+      this.scoreNode = create("strong", null, String(this.score));
+      this.clearsNode = create("strong", null, String(this.clears));
+      for (const [label, node] of [["score", this.scoreNode], ["lines", this.clearsNode]]) {
+        const stat = create("div", "stat"); stat.append(create("span", null, this.app.t(label)), node); stats.append(stat);
+      }
+      const layout = create("div", "sand-layout");
+      const frame = create("div", "sand-board");
+      this.canvas = create("canvas", "sand-canvas");
+      this.canvas.width = 80; this.canvas.height = 144;
+      this.canvas.setAttribute("aria-label", this.app.t("sand"));
+      this.canvas.setAttribute("role", "img");
+      this.context = this.canvas.getContext("2d", { alpha: true });
+      this.pixels = this.context.createImageData(80, 144);
+      this.palette = COLORS.map((color) => [1, 3, 5].map((offset) => parseInt(color.slice(offset, offset + 2), 16)));
+      frame.append(this.canvas);
+      const side = create("aside", "tetris-side");
+      this.nextNode = create("div", "next-preview");
+      side.append(create("span", "side-label", this.app.t("next")), this.nextNode);
+      this.stateNode = create("div", "pause-state", this.app.t("running")); side.append(this.stateNode);
+      layout.append(frame, side);
+      const controls = create("div", "tetris-controls sand-controls");
+      for (const [symbol, label, action] of [
+        ["←", "moveLeft", () => this.move(-1)], ["↻", "rotate", () => this.rotate()], ["→", "moveRight", () => this.move(1)],
+        ["↓", "softDrop", () => this.softDrop()], ["⤓", "hardDrop", () => this.hardDrop()], ["↺", "newGame", () => this.app.launchGame("sand", this.difficulty, null, { mixedColors: this.mixedColors })],
+      ]) controls.append(this.app.iconButton(this.app.t(label), symbol, action));
+      this.canvas.addEventListener("pointerdown", (event) => {
+        if (this.over || this.app.isGameBlocked()) return;
+        this.touchStart = { x: event.clientX, y: event.clientY, pieceX: this.current.x };
+        this.canvas.setPointerCapture(event.pointerId);
+      });
+      this.canvas.addEventListener("pointermove", (event) => {
+        if (!this.touchStart || this.over || this.app.isGameBlocked()) return;
+        const rect = this.canvas.getBoundingClientRect();
+        const target = Math.max(0, Math.min(80 - this.current.shape[0].length * this.blockSize, Math.round(this.touchStart.pieceX + (event.clientX - this.touchStart.x) * 80 / rect.width)));
+        const direction = Math.sign(target - this.current.x);
+        while (direction && this.current.x !== target && this.simulation.fits(this.current.shape, this.current.x + direction, this.current.y, this.blockSize)) this.current.x += direction;
+        this.draw();
+      });
+      this.canvas.addEventListener("pointerup", (event) => {
+        if (!this.touchStart) return;
+        const dx = event.clientX - this.touchStart.x; const dy = event.clientY - this.touchStart.y;
+        this.touchStart = null;
+        if (dy > 45 && dy > Math.abs(dx)) this.hardDrop();
+        else if (Math.hypot(dx, dy) < 8) this.rotate();
+      });
+      this.canvas.addEventListener("pointercancel", () => { this.touchStart = null; });
+      screen.append(stats, layout, controls); this.app.root.append(screen);
+      this.draw();
+    }
+
+    tick(time) {
+      const delta = Math.min(50, Math.max(0, time - this.lastFrame));
+      this.lastFrame = time;
+      if (!this.over && !this.backgrounded && !this.app.isGameBlocked()) {
+        this.accumulator += delta;
+        while (this.accumulator >= 1000 / 60) {
+          this.accumulator -= 1000 / 60;
+          this.simulation.step(); this.simulation.step();
+          this.clearClock += 1;
+          if (this.clearClock % 6 === 0) {
+            const cleared = this.simulation.clearConnections();
+            if (cleared.groups) {
+              this.score += cleared.pixels * 2; this.clears += cleared.groups;
+              this.flash = 160; this.app.sound(560, 0.08);
+            }
+          }
+          this.advance((CONFIG[this.difficulty].sandSpeed + Math.min(30, this.clears * 1.5)) / 60);
+          if (this.over) break;
+        }
+        this.flash = Math.max(0, this.flash - delta);
+        this.draw();
+      }
+      this.frame = requestAnimationFrame((nextTime) => this.tick(nextTime));
+    }
+
+    advance(distance) {
+      const target = this.current.y + distance;
+      while (this.current.y < target) {
+        const nextY = Math.min(target, this.current.y + 1);
+        if (!this.simulation.fits(this.current.shape, this.current.x, nextY, this.blockSize)) { this.lockPiece(); return; }
+        this.current.y = nextY;
+      }
+    }
+
+    lockPiece() {
+      this.simulation.deposit(this.current.shape, this.current.colors, this.current.x, this.current.y, this.blockSize);
+      this.score += 10;
+      this.current = this.next; this.next = this.randomPiece();
+      if (!this.simulation.fits(this.current.shape, this.current.x, this.current.y, this.blockSize)) {
+        this.over = true;
+        this.stateNode.textContent = this.app.t("gameOver");
+      }
+      this.app.saveSession();
+    }
+
+    move(direction) {
+      if (this.over || this.app.isGameBlocked()) return;
+      for (let pixel = 0; pixel < 4; pixel += 1) {
+        if (this.simulation.fits(this.current.shape, this.current.x + direction, this.current.y, this.blockSize)) this.current.x += direction;
+      }
+      this.draw();
+    }
+
+    rotate() {
+      if (this.over || this.app.isGameBlocked()) return;
+      const rotateMatrix = (matrix) => matrix[0].map((_, index) => matrix.map((row) => row[index]).reverse());
+      const shape = rotateMatrix(this.current.shape); const colors = rotateMatrix(this.current.colors);
+      for (const offset of [0, -4, 4, -8, 8]) if (this.simulation.fits(shape, this.current.x + offset, this.current.y, this.blockSize)) {
+        this.current.shape = shape; this.current.colors = colors; this.current.x += offset; break;
+      }
+      this.draw();
+    }
+
+    softDrop() { if (!this.over && !this.app.isGameBlocked()) { this.advance(5); this.draw(); } }
+    hardDrop() {
+      if (this.over || this.app.isGameBlocked()) return;
+      while (this.simulation.fits(this.current.shape, this.current.x, this.current.y + 1, this.blockSize)) this.current.y += 1;
+      this.lockPiece(); this.draw();
+    }
+
+    draw() {
+      const { data } = this.pixels;
+      let grains = 0;
+      for (let index = 0; index < this.simulation.cells.length; index += 1) {
+        const color = this.simulation.cells[index]; const offset = index * 4;
+        if (!color) { data[offset + 3] = 0; continue; }
+        grains += 1;
+        const shade = ((index * 37 + Math.floor(index / 80) * 11) % 7 - 3) * 3;
+        const rgb = this.palette[color - 1];
+        data[offset] = Math.max(0, Math.min(255, rgb[0] + shade));
+        data[offset + 1] = Math.max(0, Math.min(255, rgb[1] + shade));
+        data[offset + 2] = Math.max(0, Math.min(255, rgb[2] + shade)); data[offset + 3] = 255;
+      }
+      this.context.putImageData(this.pixels, 0, 0);
+      this.current.shape.forEach((row, y) => row.forEach((filled, x) => {
+        if (!filled) return;
+        const color = COLORS[this.current.colors[y][x] - 1];
+        const px = this.current.x + x * this.blockSize; const py = Math.floor(this.current.y) + y * this.blockSize;
+        this.context.fillStyle = color;
+        this.context.fillRect(px, py, this.blockSize, this.blockSize);
+        if (storage.value.gameStyle === "glossy") {
+          this.context.fillStyle = "rgba(255,255,255,0.4)"; this.context.fillRect(px + 1, py, this.blockSize - 2, 2);
+          this.context.fillStyle = "rgba(0,0,0,0.16)"; this.context.fillRect(px, py + this.blockSize - 1, this.blockSize, 1);
+        }
+      }));
+      if (this.flash > 0) { this.context.fillStyle = `rgba(255,255,255,${this.flash / 160 * 0.18})`; this.context.fillRect(0, 0, 80, 144); }
+      this.canvas.dataset.grains = String(grains);
+      this.canvas.dataset.activeRow = String(Math.floor(this.current.y));
+      this.scoreNode.textContent = String(this.score); this.clearsNode.textContent = String(this.clears);
+      if (this.renderedNext !== this.next) {
+        this.renderedNext = this.next;
+        const preview = create("div", "mini-tetromino");
+        preview.style.gridTemplateColumns = `repeat(${this.next.shape[0].length}, 11px)`;
+        this.next.shape.forEach((row, y) => row.forEach((filled, x) => {
+          const cell = create("b", filled ? "" : "empty");
+          cell.style.background = COLORS[this.next.colors[y][x] - 1] || "transparent"; preview.append(cell);
+        }));
+        this.nextNode.replaceChildren(preview);
+      }
+    }
+
+    setActive(active) { this.backgrounded = !active; this.lastFrame = performance.now(); this.touchStart = null; }
+    serialize() { return { cells: this.simulation.serialize(), current: this.current, next: this.next, score: this.score, clears: this.clears }; }
+    destroy() { cancelAnimationFrame(this.frame); window.removeEventListener("keydown", this.boundKeyDown); }
+  }
+
   class SudokuGame {
-    constructor(app, level) {
+    constructor(app, level, state = null) {
       this.app = app;
       this.level = level;
-      this.solution = [5,3,4,6,7,8,9,1,2,6,7,2,1,9,5,3,4,8,1,9,8,3,4,2,5,6,7,8,5,9,7,6,1,4,2,3,4,2,6,8,5,3,7,9,1,7,1,3,9,2,4,8,5,6,9,6,1,5,3,7,2,8,4,2,8,7,4,1,9,6,3,5,3,4,5,2,8,6,1,7,9];
-      this.board = [...this.solution];
-      this.given = new Set();
-      this.selected = null;
-      this.notes = Array.from({ length: 81 }, () => new Set());
-      this.wrong = new Set(); this.noteMode = false; this.mistakes = 0; this.elapsed = 0;
-      const holes = { easy: 30, medium: 40, hard: 50, extreme: 58 }[level];
-      shuffle([...Array(81).keys()]).slice(0, holes).forEach((index) => { this.board[index] = 0; });
-      this.board.forEach((value, index) => { if (value) this.given.add(index); });
+      const puzzle = state ? null : window.SudokuGen.getSudoku(level === "veryHard" ? "expert" : level);
+      this.solution = state?.solution || [...puzzle.solution].map(Number);
+      this.board = state?.board || [...puzzle.puzzle].map((cell) => cell === "-" ? 0 : Number(cell));
+      this.given = new Set(state?.given || this.board.flatMap((value, index) => value ? [index] : []));
+      this.selected = state?.selected ?? null;
+      this.notes = state ? state.notes.map((notes) => new Set(notes)) : Array.from({ length: 81 }, () => new Set());
+      this.wrong = new Set(state?.wrong || []); this.noteMode = state?.noteMode || false; this.mistakes = state?.mistakes || 0; this.elapsed = state?.elapsed || 0;
       this.renderShell();
       this.backgrounded = document.hidden;
-      this.timer = window.setInterval(() => { if (!this.complete && !this.backgrounded) { this.elapsed += 1; this.timeNode.textContent = this.formatTime(this.elapsed); } }, 1000);
+      this.timer = window.setInterval(() => { if (!this.complete && !this.backgrounded && !this.app.isGameBlocked()) { this.elapsed += 1; this.timeNode.textContent = this.formatTime(this.elapsed); } }, 1000);
     }
 
     renderShell() {
       const screen = create("main", "screen sudoku-screen");
       screen.append(this.app.header(this.app.t("sudoku")));
       const stats = create("div", "score-strip");
-      this.timeNode = create("strong", null, "00:00");
+      this.timeNode = create("strong", null, this.formatTime(this.elapsed));
       this.bestNode = create("strong", null, this.formatTime(storage.value.sudokuBest[this.level] || 0));
-      this.mistakeNode = create("strong", null, "0");
+      this.mistakeNode = create("strong", null, String(this.mistakes));
       stats.append(this.stat(this.app.t("currentTime"), this.timeNode), this.stat(this.app.t("bestTime"), this.bestNode), this.stat(this.app.t("mistakes"), this.mistakeNode));
       this.boardNode = create("div", "sudoku-board");
       const pad = create("div", "number-pad");
@@ -1330,7 +1613,8 @@
       this.notesButton = create("button", "secondary", this.app.t("notes"));
       const erase = create("button", "secondary", this.app.t("erase"));
       const check = create("button", "primary", this.app.t("check"));
-      this.notesButton.addEventListener("click", () => { this.noteMode = !this.noteMode; this.notesButton.classList.toggle("active", this.noteMode); });
+      this.notesButton.classList.toggle("active", this.noteMode);
+      this.notesButton.addEventListener("click", () => { this.noteMode = !this.noteMode; this.notesButton.classList.toggle("active", this.noteMode); this.app.saveSession(); });
       erase.addEventListener("click", () => this.setNumber(0)); check.addEventListener("click", () => this.check());
       actions.append(this.notesButton, erase, check);
       screen.append(stats, this.boardNode, pad, actions);
@@ -1356,13 +1640,14 @@
         const display = value || (this.notes[index].size ? [...this.notes[index]].sort().join(" ") : "");
         const button = create("button", classes, display);
         if (this.notes[index].size) button.classList.add("notes-cell");
-        button.disabled = this.given.has(index);
-        button.addEventListener("click", () => { this.selected = index; this.draw(); });
+        button.setAttribute("aria-label", `${Math.floor(index / 9) + 1}, ${index % 9 + 1}${value ? `: ${value}` : ""}`);
+        button.addEventListener("click", () => { if (!this.app.isGameBlocked()) { this.selected = index; this.draw(); } });
         this.boardNode.append(button);
       });
     }
 
     setNumber(number) {
+      if (this.complete || this.app.isGameBlocked()) return;
       if (this.selected === null || this.given.has(this.selected)) return;
       if (this.noteMode && number) {
         this.notes[this.selected].has(number) ? this.notes[this.selected].delete(number) : this.notes[this.selected].add(number);
@@ -1373,14 +1658,17 @@
       this.mistakeNode.textContent = String(this.mistakes);
       this.draw();
       this.checkComplete();
+      this.app.saveSession();
     }
 
-    check() { this.board.forEach((value, index) => { if (!this.given.has(index) && value && value !== this.solution[index]) this.wrong.add(index); }); this.mistakes += this.wrong.size ? 1 : 0; this.mistakeNode.textContent = String(this.mistakes); this.draw(); this.checkComplete(); }
+    check() { if (this.complete || this.app.isGameBlocked()) return; this.board.forEach((value, index) => { if (!this.given.has(index) && value && value !== this.solution[index]) this.wrong.add(index); }); this.mistakes += this.wrong.size ? 1 : 0; this.mistakeNode.textContent = String(this.mistakes); this.draw(); this.checkComplete(); this.app.saveSession(); }
     checkComplete() {
-      if (!this.board.every(Boolean) || !this.board.every((value, index) => value === this.solution[index])) return;
+      if (this.complete || !this.board.every(Boolean) || !this.board.every((value, index) => value === this.solution[index])) return;
       this.complete = true; window.clearInterval(this.timer); const previous = storage.value.sudokuBest[this.level] || Infinity; if (this.elapsed < previous) storage.value.sudokuBest[this.level] = this.elapsed; storage.save(); this.bestNode.textContent = this.formatTime(storage.value.sudokuBest[this.level]); this.notice = create("div", "notice", `${this.app.t("congratulations")} ${this.formatTime(this.elapsed)}`); this.boardNode.after(this.notice); this.app.award("sudoku", Math.max(20, 120 - this.elapsed));
+      this.app.saveSession();
     }
     setActive(active) { this.backgrounded = !active; }
+    serialize() { return { board: this.board, solution: this.solution, given: [...this.given], notes: this.notes.map((notes) => [...notes]), wrong: [...this.wrong], selected: this.selected, noteMode: this.noteMode, mistakes: this.mistakes, elapsed: this.elapsed }; }
     destroy() { window.clearInterval(this.timer); }
   }
 

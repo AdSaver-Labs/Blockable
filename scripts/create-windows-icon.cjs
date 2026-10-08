@@ -4,7 +4,7 @@ const pngToIcoModule = require("png-to-ico");
 const pngToIco = pngToIcoModule.default || pngToIcoModule;
 
 const root = path.resolve(__dirname, "..");
-const source = path.join(root, "Assets", "BlockableIcon.svg.png");
+const source = path.join(root, "Assets", "BlockableDesktopIcon.png");
 const destination = path.join(root, "Assets", "Blockable.ico");
 
 pngToIco(source)

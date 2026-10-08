@@ -24,7 +24,7 @@ This blueprint preserves the current visual design. UI changes are limited to re
 
 ## P0: Mobile Interaction
 
-- [x] Make Color Link dragging reliable on touch screens using pointer coordinates.
+- [x] Make Color Link dragging reliable on touch screens using pointer coordinates (mode removed in 1.6.0).
 - [x] Add swipe controls to 2048 Merging.
 - [x] Add an explicit touch-accessible reveal/flag mode to Minesweeper.
 - [x] Respect left and right safe areas as well as the notch and home indicator.
@@ -67,20 +67,22 @@ These checkpoints require developer accounts, private signing credentials, or na
 - [ ] Split the monolithic game script into app shell, settings, storage, audio, and per-game modules.
 - [ ] Keep persistent grid elements and update changed cells instead of rebuilding full boards.
 - [ ] Add deterministic unit tests for every game engine independently of the DOM.
-- [ ] Add browser interaction tests for mouse, touch, keyboard, resize, offline, and resume flows.
+- [x] Add browser interaction tests for mouse placement/dragging, controls, resize, offline, and resume flows in Chromium and WebKit. Physical-device touch verification remains open.
 - [x] Add CI verification for source syntax, assets, manifests, versions, and dependency security.
 - [ ] Add unsigned native platform build jobs after signing and store workflows are selected.
 - [ ] Add crash reporting and privacy-respecting performance telemetry before public release.
 
 ## P2: Product Integrity
 
-- [ ] Replace random Sudoku removal with a uniqueness-checked puzzle generator.
+- [x] Replace random Sudoku removal with a locally bundled unique-puzzle generator and uniqueness tests at all four difficulties.
 - [ ] Add optional encrypted cloud progress sync across devices.
 - [ ] Complete translation coverage and locale-aware formatting.
 - [ ] Add accessible labels, focus order, contrast checks, and screen-reader game summaries.
 - [ ] Define a save-data migration policy before changing game progress formats again.
 
 ## Acceptance Checks
+
+Version 1.6.0 adds a shared difficulty configuration, independently validated multi-session saves, and a typed-array sand engine. Removed arcade modes no longer load at runtime. See PRIVATE_IPHONE_INSTALL.md for the no-App-Store route and its signing limitations. Full Xcode is not installed on the development Mac; native mobile builds and real-device tests remain unverified.
 
 - App starts offline after one successful web visit.
 - No game advances while hidden; all games resume cleanly.

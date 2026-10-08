@@ -9,3 +9,5 @@ Assets/AppIcon.iconset/
 Assets/BlockableLogo.png
 Assets/Blockable.ico
 www/
+test-results/
+playwright-report/

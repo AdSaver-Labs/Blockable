@@ -7,12 +7,20 @@ const files = [
   "index.html",
   "styles.css",
   "game.js",
+  "game-core.js",
   "version.json",
   "manifest.webmanifest",
   "manifest-3d.webmanifest",
   "service-worker.js",
 ];
 const assets = [
+  "BlockableAppIcon.png",
+  "BlockableDesktopIcon.png",
+  "pwa/apple-touch-icon.png",
+  "pwa/app-192.png",
+  "pwa/app-512.png",
+  "pwa/maskable-192.png",
+  "pwa/maskable-512.png",
   "BlockableIcon.svg.png",
   "BlockableMinimalIcon.png",
   "pwa/glossy-192.png",
@@ -24,6 +32,7 @@ const assets = [
 fs.rmSync(output, { recursive: true, force: true });
 fs.mkdirSync(output, { recursive: true });
 for (const file of files) fs.copyFileSync(path.join(root, file), path.join(output, file));
+fs.cpSync(path.join(root, "vendor"), path.join(output, "vendor"), { recursive: true });
 for (const asset of assets) {
   const destination = path.join(output, "Assets", asset);
   fs.mkdirSync(path.dirname(destination), { recursive: true });

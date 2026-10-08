@@ -1,6 +1,7 @@
 {
-  "name": "Blockable 3D",
+  "name": "Blockable",
   "short_name": "Blockable",
+  "id": "./",
   "description": "A tactile collection of colorful grid games.",
   "start_url": "./",
   "scope": "./",
@@ -10,22 +11,24 @@
   "orientation": "any",
   "icons": [
     {
-      "src": "./Assets/pwa/glossy-192.png",
+      "src": "./Assets/pwa/app-192.png",
       "sizes": "192x192",
       "type": "image/png",
-      "purpose": "any maskable"
+      "purpose": "any"
     },
     {
-      "src": "./Assets/pwa/glossy-512.png",
+      "src": "./Assets/pwa/app-512.png",
       "sizes": "512x512",
       "type": "image/png",
-      "purpose": "any maskable"
+      "purpose": "any"
     },
     {
-      "src": "./Assets/BlockableIcon.svg.png",
+      "src": "./Assets/BlockableAppIcon.png",
       "sizes": "1024x1024",
       "type": "image/png",
       "purpose": "any"
-    }
+    },
+    { "src": "./Assets/pwa/maskable-192.png", "sizes": "192x192", "type": "image/png", "purpose": "maskable" },
+    { "src": "./Assets/pwa/maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
   ]
 }
